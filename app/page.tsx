@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { BarChart3, Brain, Calculator, Check, ChevronDown, ClipboardList, Settings, Sparkles, Target, WandSparkles } from 'lucide-react'
 
 type Draw = { date: string; day: string; special: string; tail: string; prizes: string[][]; predictions: Record<string, string> }
@@ -21,10 +21,10 @@ const sources = [
   { key: 'ds', label: 'DeepSeek AI', color: 'cyan', description: 'Phân tích AI' },
 ] as const
 
-function accuracy(key: string) {
+function accuracy(key: string, data: Draw[]) {
   let hit = 0
-  draws.forEach((draw) => draw.predictions[key].split('').forEach((digit, index) => { if (digit === draw.tail[index]) hit++ }))
-  return { hit, total: draws.length * 4, percent: (hit / (draws.length * 4) * 100).toFixed(1) }
+  data.forEach((draw) => (draw.predictions[key] || '----').split('').forEach((digit, index) => { if (digit === draw.tail[index]) hit++ }))
+  return { hit, total: data.length * 4, percent: data.length ? (hit / (data.length * 4) * 100).toFixed(1) : '0.0' }
 }
 
 function frequencyPrediction(values: string[], rank = 0) {
@@ -39,7 +39,27 @@ export default function Page() {
   const [tab, setTab] = useState('history')
   const [results, setResults] = useState<Record<string, string>>({})
   const [message, setMessage] = useState('Sẵn sàng — chọn một phương pháp để bắt đầu tính toán')
-  const tails = draws.slice(0, 5).map((draw) => draw.tail)
+  const [liveDraws, setLiveDraws] = useState<Draw[]>(draws)
+  const [syncing, setSyncing] = useState(false)
+  const [syncedAt, setSyncedAt] = useState('')
+  const activeDraws = liveDraws.length ? liveDraws : draws
+  const tails = activeDraws.slice(0, 5).map((draw) => draw.tail)
+
+  const syncData = async () => {
+    setSyncing(true)
+    try {
+      const response = await fetch('/api/xsmb')
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error)
+      setLiveDraws(payload.draws)
+      setSyncedAt(payload.syncedAt)
+      setMessage(`Đã đồng bộ ${payload.count} ngày từ Minh Ngọc`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Đồng bộ thất bại')
+    } finally { setSyncing(false) }
+  }
+
+  useEffect(() => { syncData() }, [])
   const final = useMemo(() => {
     const all = Object.values(results).filter((value) => value.length === 4)
     if (!all.length) return ''
@@ -55,7 +75,7 @@ export default function Page() {
   return (<main className="app-shell">
     <header className="brand"><div className="brand-mark">M</div><div><h1>MINH NGỌC <span>PRO</span></h1><p>Nghiên cứu & Dự đoán Xổ số Miền Bắc</p></div><div className="header-date"><span>NGÀY PHÂN TÍCH</span><strong>01.11.2026</strong></div></header>
     <nav className="tabs" aria-label="Điều hướng"><button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><ClipboardList size={17}/> Lịch sử & Đối chiếu</button><button className={tab === 'predict' ? 'active' : ''} onClick={() => setTab('predict')}><WandSparkles size={17}/> Dự đoán & Tính toán</button><button className={tab === 'config' ? 'active' : ''} onClick={() => setTab('config')}><Settings size={17}/> Kịch bản & API</button></nav>
-    {tab === 'history' && <section className="content"><div className="hero-line"><div><p className="eyebrow">TỔNG QUAN HIỆU SUẤT</p><h2>Đối chiếu 10 ngày gần nhất</h2></div><span className="live"><i/> DỮ LIỆU ĐANG CẬP NHẬT</span></div><div className="summary-grid">{sources.map((source) => { const stat = accuracy(source.key); return <div className={`stat-card ${source.color}`} key={source.key}><div className="stat-head"><span>{source.label}</span><BarChart3 size={16}/></div><strong>{stat.percent}<small>%</small></strong><p>{stat.hit} / {stat.total} chữ số khớp</p><div className="progress"><i style={{ width: `${stat.percent}%` }}/></div></div> })}</div><div className="section-label"><span>KẾT QUẢ XỔ SỐ</span><b>HIỂN THỊ CHI TIẾT <ChevronDown size={15}/></b></div>{draws.map((draw) => <article className="draw-card" key={draw.date}><div className="draw-header"><div><strong>{draw.date}</strong><span>{draw.day}</span></div><div className="special">ĐẶC BIỆT <b>{draw.special}</b><em>Đuôi {draw.tail}</em></div></div><div className="prizes">{draw.prizes.map((prize, index) => <div className="prize-row" key={index}><label>Giải {index === 0 ? 'ĐB' : index}</label><div>{prize.map((number) => <span key={number} className={index === 0 ? 'big-number' : ''}>{number}</span>)}</div></div>)}</div><div className="comparison">{sources.map((source) => { const prediction = draw.predictions[source.key]; return <div className="comparison-row" key={source.key}><b>{source.label}</b><div>{prediction.split('').map((digit, index) => <i className={digit === draw.tail[index] ? 'match' : ''} key={`${digit}-${index}`}>{digit}</i>)}</div><small>{prediction.split('').filter((digit, index) => digit === draw.tail[index]).length}/4</small></div> })}</div></article>)}<p className="disclaimer">Dữ liệu tham khảo từ minhngoc.net — Xổ số mang tính ngẫu nhiên cao, chỉ dùng nghiên cứu tham khảo.</p></section>}
+    {tab === 'history' && <section className="content"><div className="hero-line"><div><p className="eyebrow">TỔNG QUAN HIỆU SUẤT</p><h2>Toàn bộ kết quả đến hôm nay</h2></div><div className="history-actions"><span className="live"><i/> {syncedAt ? `Đồng bộ lúc ${new Date(syncedAt).toLocaleTimeString('vi-VN')}` : 'Đang cập nhật dữ liệu'}</span><button className="sync-button" onClick={syncData} disabled={syncing}>{syncing ? 'Đang đồng bộ…' : 'Đồng bộ ngay'}</button></div></div><div className="summary-grid">{sources.map((source) => { const stat = accuracy(source.key, activeDraws); return <div className={`stat-card ${source.color}`} key={source.key}><div className="stat-head"><span>{source.label}</span><BarChart3 size={16}/></div><strong>{stat.percent}<small>%</small></strong><p>{stat.hit} / {stat.total} chữ số khớp</p><div className="progress"><i style={{ width: `${stat.percent}%` }}/></div></div> })}</div><div className="section-label"><span>KẾT QUẢ XỔ SỐ</span><b>HIỂN THỊ CHI TIẾT <ChevronDown size={15}/></b></div>{activeDraws.map((draw) => <article className="draw-card" key={draw.date}><div className="draw-header"><div><strong>{draw.date}</strong><span>{draw.day}</span></div><div className="special">ĐẶC BIỆT <b>{draw.special}</b><em>Đuôi {draw.tail}</em></div></div><div className="prizes">{draw.prizes.map((prize, index) => <div className="prize-row" key={index}><label>Giải {index === 0 ? 'ĐB' : index}</label><div>{prize.map((number) => <span key={number} className={index === 0 ? 'big-number' : ''}>{number}</span>)}</div></div>)}</div><div className="comparison">{sources.map((source) => { const prediction = draw.predictions[source.key] || '----'; return <div className="comparison-row" key={source.key}><b>{source.label}</b><div>{prediction.split('').map((digit, index) => <i className={digit === draw.tail[index] ? 'match' : ''} key={`${digit}-${index}`}>{digit}</i>)}</div><small>{prediction.split('').filter((digit, index) => digit === draw.tail[index]).length}/4</small></div> })}</div></article>)}<p className="disclaimer">Dữ liệu tham khảo từ minhngoc.net — Xổ số mang tính ngẫu nhiên cao, chỉ dùng nghiên cứu tham khảo.</p></section>}
     {tab === 'predict' && <section className="content"><div className="hero-line"><div><p className="eyebrow">PHÒNG THÍ NGHIỆM DỰ ĐOÁN</p><h2>Tính toán cho ngày mới</h2></div><span className="method-note"><Calculator size={15}/> 5 ngày gần nhất</span></div><div className="action-row">{sources.map((source) => <button key={source.key} className={`action ${source.color}`} onClick={() => calculate(source.key)}><Sparkles size={15}/> {source.label}</button>)}<button className="action final-action" onClick={() => final ? setMessage(`Tổng hợp từ ${Object.keys(results).length} nguồn: ${final}`) : setMessage('Chưa có kết quả tính toán') }><Target size={15}/> Tổng hợp cuối</button></div><div className="prediction-grid">{sources.map((source) => <div className="prediction-card" key={source.key}><div><span className={`icon-bubble ${source.color}`}><Brain size={16}/></span><div><b>{source.label}</b><small>{source.description}</small></div></div><strong>{results[source.key] || '----'}</strong><div className="digits">{(results[source.key] || '----').split('').map((digit, index) => <i className={results[source.key] ? 'filled' : ''} key={index}>{digit}</i>)}</div></div>)}</div>{final && <div className="final-result"><span>KẾT QUẢ TỔNG HỢP</span><strong>{final}</strong><p>Độ tin cậy dự kiến: <b>50%</b></p></div>}<div className="log"><Check size={16}/> {message}</div></section>}
     {tab === 'config' && <section className="content config"><div className="hero-line"><div><p className="eyebrow">CẤU HÌNH HỆ THỐNG</p><h2>Kịch bản & API</h2></div></div><div className="config-panel"><div className="key-grid"><label>Gemini API Key<input type="password" placeholder="Nhập khóa từ Google AI Studio"/></label><label>DeepSeek API Key<input type="password" placeholder="Nhập khóa từ DeepSeek"/></label></div>{[['Công thức 1','Đếm tần suất từng vị trí đuôi GĐB → lấy số nhiều nhất'],['Công thức 2','Loại bỏ số xuất hiện nhiều nhất → lấy cao thứ 2'],['Công thức 3','Phân tích xu hướng thay đổi giữa các ngày']].map(([label, value]) => <label key={label}>{label}<textarea defaultValue={value}/></label>)}<div className="key-grid"><label>Số ngày phân tích<input type="number" defaultValue="5" min="1"/></label><label>Ngưỡng tin cậy (%)<input type="number" defaultValue="50" min="0" max="100"/></label></div><button className="save" onClick={() => setMessage('Đã lưu cấu hình thành công')}>Lưu cấu hình</button></div></section>}
   </main>)
