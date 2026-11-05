@@ -3,8 +3,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Minh Ngọc Pro — XSMB',
-  description: 'Nghiên cứu và đối chiếu xổ số miền Bắc',
+  title: 'Minh Ngọc Pro — Dự đoán & Đối chiếu XSMB',
+  description: 'Theo dõi kết quả xổ số miền Bắc, lưu dự đoán theo ngày và đối chiếu các kịch bản tham khảo.',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -26,11 +26,11 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light dark',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: 'white' },
-    { media: '(prefers-color-scheme: dark)', color: 'black' },
-  ],
+  width: 'device-width',
+  initialScale: 1,
+  userScalable: true,
+  colorScheme: 'light',
+  themeColor: '#f5f6f8',
 }
 
 export default function RootLayout({
@@ -39,7 +39,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="vi">
       <body className="antialiased">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
