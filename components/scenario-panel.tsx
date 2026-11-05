@@ -123,8 +123,16 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
         <div className="config-note" role="note">
           <span className="gateway-indicator" aria-hidden="true" />
           <div>
-            <strong>Gemini và DeepSeek đã được kết nối qua Vercel AI Gateway.</strong>
-            <p>Không cần dán khóa API vào trang này hoặc gửi khóa qua chat. Thông tin xác thực luôn được xử lý phía máy chủ.</p>
+            <strong>Gemini và DeepSeek chạy phía máy chủ bằng khóa API riêng.</strong>
+            <p>Thêm khóa trong Vars bảo mật của project; không dán khóa vào trang này, chat, hoặc mã nguồn.</p>
+          </div>
+        </div>
+
+        <div className="config-note schedule-note" role="note">
+          <span className="gateway-indicator" aria-hidden="true" />
+          <div>
+            <strong>Lịch dự kiến: 10:00 mỗi ngày, giờ Việt Nam.</strong>
+            <p>Khi có đúng 6 kịch bản tùy chỉnh và CRON_SECRET, mỗi kịch bản sẽ được phân tích riêng bởi cả Gemini lẫn DeepSeek; 12 kết quả sẽ lưu vào lịch sử. Đây là suy luận hằng ngày, không phải huấn luyện lại mô hình.</p>
           </div>
         </div>
 
@@ -196,7 +204,7 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
                 </div>
 
                 {fixedFormula ? (
-                  <p className="scenario-footnote">Công thức mặc định được tính trực tiếp từ dữ liệu 5 kỳ gần nhất.</p>
+                  <p className="scenario-footnote">Công thức mặc định được tính trực tiếp từ dữ liệu 10 kỳ gần nhất.</p>
                 ) : (
                   <div className="scenario-actions">
                     <button className="save" onClick={() => saveScenario(scenario)} disabled={!changed || savingId === scenario.id}>

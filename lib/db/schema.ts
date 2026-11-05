@@ -57,3 +57,27 @@ export const xsmbPredictions = pgTable(
     ),
   }),
 )
+
+export const xsmbAiReports = pgTable(
+  'xsmb_ai_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: text('user_id').notNull().default('shared'),
+    targetDate: date('target_date', { mode: 'string' }).notNull(),
+    scenarioId: text('scenario_id').notNull(),
+    scenarioName: text('scenario_name').notNull(),
+    provider: text('provider').$type<ScenarioProvider>().notNull(),
+    modelId: text('model_id').notNull(),
+    promptSnapshot: text('prompt_snapshot').notNull(),
+    analysis: text('analysis').notNull(),
+    prediction: text('prediction').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userDateScenarioUnique: uniqueIndex('xsmb_ai_reports_user_date_scenario_unique').on(
+      table.userId,
+      table.targetDate,
+      table.scenarioId,
+    ),
+  }),
+)

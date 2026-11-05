@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { ensureDefaultAnalysisScenarios } from '@/lib/db/seed'
+import { AI_MODELS } from '@/lib/ai-prediction'
 import { xsmbScenarios } from '@/lib/db/schema'
 import { isSameOriginRequest } from '@/lib/request-security'
 import type { Scenario } from '@/lib/xsmb-types'
@@ -10,10 +12,6 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 const USER_SCOPE = 'shared'
-const AI_MODELS = {
-  gemini: 'google/gemini-3.8-flash',
-  deepseek: 'deepseek/deepseek-v4.1-flash',
-} as const
 
 type ScenarioBody = {
   id?: unknown
@@ -54,6 +52,7 @@ function toClientScenario(row: typeof xsmbScenarios.$inferSelect): Scenario {
 
 export async function GET() {
   try {
+    await ensureDefaultAnalysisScenarios()
     const rows = await db
       .select()
       .from(xsmbScenarios)

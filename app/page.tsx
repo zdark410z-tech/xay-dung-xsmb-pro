@@ -17,5 +17,5 @@ function getVietnamDate(offsetDays = 0) {
 }
 
 export default function Page() {
-  return <XsmbApp todayDate={getVietnamDate()} initialTargetDate={getVietnamDate(1)} />
+  return <XsmbApp todayDate={getVietnamDate()} initialTargetDate={getVietnamDate()} />
 }
