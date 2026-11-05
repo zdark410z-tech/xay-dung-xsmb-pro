@@ -29,8 +29,8 @@ function colorFor(scenario: Scenario) {
 }
 
 function modelLabel(scenario: Scenario) {
-  if (scenario.provider === 'gemini') return 'Gemini qua AI Gateway'
-  if (scenario.provider === 'deepseek') return 'DeepSeek qua AI Gateway'
+  if (scenario.provider === 'gemini') return 'Gemini API · server-side'
+  if (scenario.provider === 'deepseek') return 'DeepSeek API · server-side'
   return 'Công thức nội bộ'
 }
 
@@ -63,7 +63,7 @@ export function PredictionPanel({
           <p className="eyebrow">PHÒNG THÍ NGHIỆM DỰ ĐOÁN</p>
           <h2 id="prediction-title">Tính toán cho ngày mới</h2>
         </div>
-        <span className="method-note"><Calculator aria-hidden="true" size={15} /> {Math.min(recentCount, 5)} kỳ gần nhất</span>
+        <span className="method-note"><Calculator aria-hidden="true" size={15} /> {Math.min(recentCount, 10)} kỳ gần nhất</span>
       </div>
 
       <div className="prediction-controls">

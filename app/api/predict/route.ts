@@ -1,5 +1,5 @@
-import { generateText } from 'ai'
 import { and, desc, eq } from 'drizzle-orm'
+import { generateSinglePrediction, getAiFailureMessage, type AiProvider } from '@/lib/ai-prediction'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { xsmbDraws, xsmbPredictions, xsmbScenarios } from '@/lib/db/schema'
@@ -10,10 +10,6 @@ export const runtime = 'nodejs'
 export const maxDuration = 45
 
 const USER_SCOPE = 'shared'
-const AI_MODELS = {
-  gemini: 'google/gemini-3.8-flash',
-  deepseek: 'deepseek/deepseek-v4.1-flash',
-} as const
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -110,7 +106,7 @@ export async function POST(request: NextRequest) {
       .from(xsmbDraws)
       .where(eq(xsmbDraws.userId, USER_SCOPE))
       .orderBy(desc(xsmbDraws.drawDate))
-      .limit(5)
+      .limit(10)
     const tails = recentDraws.map((draw) => draw.tail).filter((tail) => /^\d{4}$/.test(tail))
 
     if (!tails.length) {
@@ -127,27 +123,18 @@ export async function POST(request: NextRequest) {
       }
       modelId = null
     } else {
-      const model = scenario.provider === 'gemini' ? AI_MODELS.gemini : AI_MODELS.deepseek
       try {
-        const result = await generateText({
-          model,
-          instructions:
-            'Bạn phân tích dữ liệu xổ số cho mục đích tham khảo, không cam kết hay khẳng định kết quả. Hãy làm theo kịch bản được cung cấp và chỉ trả về đúng một chuỗi gồm 4 chữ số.',
-          prompt: [
-            `Ngày xổ số mục tiêu: ${targetDate}.`,
-            `Đuôi 4 số giải đặc biệt gần nhất, mới nhất trước: ${tails.join(', ')}.`,
-            `Kịch bản: ${scenario.prompt}`,
-            'Chỉ trả về một dãy 4 chữ số, không giải thích và không thêm dấu câu.',
-          ].join('\n'),
-          maxOutputTokens: 8,
+        const result = await generateSinglePrediction({
+          provider: scenario.provider as AiProvider,
+          targetDate,
+          tails,
+          scenarioName: scenario.name,
+          scenarioPrompt: scenario.prompt,
         })
-        prediction = result.text.match(/\d{4}/)?.[0] ?? null
-      } catch {
-        return NextResponse.json({ error: 'Dịch vụ AI chưa phản hồi. Vui lòng thử lại sau.' }, { status: 502 })
-      }
-
-      if (!prediction) {
-        return NextResponse.json({ error: 'AI không trả về dãy 4 chữ số hợp lệ. Hãy thử lại.' }, { status: 502 })
+        prediction = result.prediction
+        modelId = result.modelId
+      } catch (error) {
+        return NextResponse.json({ error: getAiFailureMessage(error) }, { status: 502 })
       }
     }
 
