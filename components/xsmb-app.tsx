@@ -98,6 +98,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenarioId: scenario.id, targetDate }),
+        signal: AbortSignal.timeout(35_000),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error ?? 'Không thể tạo dự đoán.')
@@ -114,7 +115,13 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
       )
       void mutateHistory()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Không thể tạo dự đoán.')
+      setMessage(
+        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+          ? 'AI phản hồi quá lâu. Vui lòng thử lại sau.'
+          : error instanceof Error
+            ? error.message
+            : 'Không thể tạo dự đoán.',
+      )
     } finally {
       setRunningId(null)
     }

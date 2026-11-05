@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
         prediction = result.prediction
         modelId = result.modelId
       } catch (error) {
-        return NextResponse.json({ error: getAiFailureMessage(error) }, { status: 502 })
+        return NextResponse.json({ error: getAiFailureMessage(error, scenario.provider) }, { status: 502 })
       }
     }
 

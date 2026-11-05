@@ -126,7 +126,7 @@ export async function GET(request: NextRequest) {
         )
         if (!pendingScenarios.length) return { provider, saved: 0 }
 
-        const predictions = await generateDailyBatchPredictions({
+        const generated = await generateDailyBatchPredictions({
           provider,
           targetDate,
           tails,
@@ -145,9 +145,9 @@ export async function GET(request: NextRequest) {
             scenarioId: predictionRowId(scenario.id, provider),
             scenarioName: `${scenario.name} · ${providerLabel(provider)}`,
             provider,
-            modelId: AI_MODELS[provider],
+            modelId: generated.modelId,
             promptSnapshot: scenario.prompt,
-            prediction: predictions.get(scenario.id)!,
+            prediction: generated.predictions.get(scenario.id)!
           })))
           .onConflictDoNothing({
             target: [xsmbPredictions.userId, xsmbPredictions.targetDate, xsmbPredictions.scenarioId],
@@ -164,7 +164,7 @@ export async function GET(request: NextRequest) {
     )
     const failures = providerRuns.flatMap((run, index) =>
       run.status === 'rejected'
-        ? [{ provider: PROVIDERS[index], message: getAiFailureMessage(run.reason) }]
+        ? [{ provider: PROVIDERS[index], message: getAiFailureMessage(run.reason, PROVIDERS[index]) }]
         : [],
     )
 
