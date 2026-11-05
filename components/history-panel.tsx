@@ -117,6 +117,7 @@ export function HistoryPanel({
 
       {draws.map((draw) => {
         const hasResult = /^\d{4}$/.test(draw.tail)
+        const reports = Object.entries(draw.reports ?? {})
         return (
           <article className="draw-card" key={draw.date}>
             <div className="draw-header">
@@ -183,6 +184,26 @@ export function HistoryPanel({
               })}
               {scenarios.length === 0 && <p className="no-scenarios">Chưa có kịch bản để đối chiếu.</p>}
             </div>
+
+            {reports.length > 0 && (
+              <details className="analysis-details">
+                <summary>Xem phân tích AI chi tiết ({reports.length})</summary>
+                <div className="analysis-report-list">
+                  {reports.map(([reportId, report]) => (
+                    <section className="analysis-report" key={reportId}>
+                      <div className="analysis-report-heading">
+                        <div>
+                          <strong>{report.name}</strong>
+                          <small>{report.provider === 'gemini' ? 'Gemini' : 'DeepSeek'} · {report.modelId}</small>
+                        </div>
+                        <b>{report.prediction}</b>
+                      </div>
+                      <div className="analysis-report-body">{report.analysis}</div>
+                    </section>
+                  ))}
+                </div>
+              </details>
+            )}
           </article>
         )
       })}

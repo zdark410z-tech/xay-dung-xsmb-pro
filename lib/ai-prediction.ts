@@ -74,6 +74,28 @@ type ScenarioPrompt = {
   prompt: string
 }
 
+type DailyAnalysisContext = {
+  draws: Array<{
+    date: string
+    day: string
+    special: string
+    tail: string
+    prizes: string[][]
+  }>
+  methodPerformance: Array<{
+    scenarioId: string
+    name: string
+    matchedDigits: number
+    totalDigits: number
+    accuracyPercent: string | null
+  }>
+  currentMethodPredictions: Array<{
+    scenarioId: string
+    name: string
+    prediction: string | null
+  }>
+}
+
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -177,11 +199,13 @@ export async function generateDailyBatchPredictions({
   provider,
   targetDate,
   tails,
+  analysisContext,
   scenarios,
 }: {
   provider: AiProvider
   targetDate: string
   tails: string[]
+  analysisContext: DailyAnalysisContext
   scenarios: ScenarioPrompt[]
 }) {
   const { result, modelId } = await generateWithModelFallback(provider, 'daily-batch', (model) =>
@@ -189,51 +213,57 @@ export async function generateDailyBatchPredictions({
       model,
       output: Output.json(),
       instructions:
-        'Bạn phân tích xổ số để tham khảo, không huấn luyện hay thay đổi trọng số mô hình. Hãy xử lý độc lập từng kịch bản và trả về JSON có dạng {"predictions":[{"scenarioId":"...","prediction":"0123"}]}. Mỗi prediction phải là chuỗi đúng 4 chữ số.',
+        'Bạn phân tích XSMB để tham khảo, không huấn luyện hay thay đổi trọng số mô hình. Hãy làm đầy đủ từng bước trong mỗi kịch bản bằng tiếng Việt, dùng số liệu cụ thể và % từ dữ liệu được cung cấp, không dùng placeholder. Trả về JSON đúng dạng {"reports":[{"scenarioId":"...","prediction":"0123","analysis":"báo cáo chi tiết"}]}. prediction là bộ 4 chữ số chính của kịch bản; analysis phải chứa phần tính toán và các phương án/rủi ro được yêu cầu. Gọi mọi tỷ lệ là tần suất hoặc điểm heuristic của mẫu ngắn, không khẳng định đó là xác suất trúng thật.',
       prompt: JSON.stringify({
         targetDate,
         recentSpecialTails: tails,
+        analysisContext,
         scenarios: scenarios.map((scenario) => ({
           scenarioId: scenario.id,
           name: scenario.name,
           instructions: scenario.prompt,
         })),
       }),
-      maxOutputTokens: 768,
+      maxOutputTokens: 4096,
       maxRetries: 0,
-      abortSignal: AbortSignal.timeout(15_000),
+      abortSignal: AbortSignal.timeout(20_000),
     }),
   )
 
   const output = result.output
-  if (!isRecord(output) || !Array.isArray(output.predictions)) {
-    const error = new Error('AI model returned an invalid prediction batch')
+  if (!isRecord(output) || !Array.isArray(output.reports)) {
+    const error = new Error('AI model returned an invalid analysis batch')
     logProviderFailure('daily-output-validation', provider, error)
     throw error
   }
 
   const expectedIds = new Set(scenarios.map((scenario) => scenario.id))
-  const predictions = new Map<string, string>()
+  const reports = new Map<string, { prediction: string; analysis: string }>()
 
-  for (const item of output.predictions) {
-    if (!isRecord(item) || typeof item.scenarioId !== 'string' || typeof item.prediction !== 'string') {
-      const error = new Error('AI model returned an invalid scenario result')
+  for (const item of output.reports) {
+    if (
+      !isRecord(item) ||
+      typeof item.scenarioId !== 'string' ||
+      typeof item.prediction !== 'string' ||
+      typeof item.analysis !== 'string'
+    ) {
+      const error = new Error('AI model returned an invalid scenario report')
       logProviderFailure('daily-output-validation', provider, error)
       throw error
     }
-    if (!expectedIds.has(item.scenarioId) || !/^\d{4}$/.test(item.prediction)) {
-      const error = new Error('AI model returned an unknown scenario or invalid number')
+    if (!expectedIds.has(item.scenarioId) || !/^\d{4}$/.test(item.prediction) || item.analysis.trim().length < 80) {
+      const error = new Error('AI model returned an incomplete or invalid scenario report')
       logProviderFailure('daily-output-validation', provider, error)
       throw error
     }
-    predictions.set(item.scenarioId, item.prediction)
+    reports.set(item.scenarioId, { prediction: item.prediction, analysis: item.analysis })
   }
 
-  if (predictions.size !== expectedIds.size) {
-    const error = new Error('AI model did not return a result for every scenario')
+  if (reports.size !== expectedIds.size) {
+    const error = new Error('AI model did not return a report for every scenario')
     logProviderFailure('daily-output-validation', provider, error)
     throw error
   }
 
-  return { predictions, modelId }
+  return { reports, modelId }
 }

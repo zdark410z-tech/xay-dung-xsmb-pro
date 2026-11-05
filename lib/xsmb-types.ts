@@ -16,6 +16,14 @@ export type PredictionMeta = {
   provider: ScenarioProvider
 }
 
+export type XsmbAiReport = {
+  name: string
+  provider: Extract<ScenarioProvider, 'gemini' | 'deepseek'>
+  modelId: string
+  prediction: string
+  analysis: string
+}
+
 export type XsmbDraw = {
   date: string
   day: string
@@ -24,6 +32,7 @@ export type XsmbDraw = {
   prizes: string[][]
   predictions: Record<string, string>
   predictionMeta: Record<string, PredictionMeta>
+  reports: Record<string, XsmbAiReport>
 }
 
 export type XsmbHistoryResponse = {

@@ -2,16 +2,25 @@ import { timingSafeEqual } from 'node:crypto'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { xsmbDraws, xsmbPredictions, xsmbScenarios } from '@/lib/db/schema'
+import { ensureDefaultAnalysisScenarios } from '@/lib/db/seed'
+import { xsmbAiReports, xsmbDraws, xsmbPredictions, xsmbScenarios } from '@/lib/db/schema'
 import { AI_MODELS, generateDailyBatchPredictions, getAiFailureMessage, type AiProvider } from '@/lib/ai-prediction'
+import { formulaPrediction } from '@/lib/xsmb-formulas'
 import { syncRecentDraws, XSMB_USER_SCOPE } from '@/lib/xsmb-source'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-export const maxDuration = 45
+export const maxDuration = 60
 
 const REQUIRED_SCENARIOS = 6
 const PROVIDERS: AiProvider[] = ['gemini', 'deepseek']
+const BASE_METHODS = [
+  { id: 'c1', name: 'Công thức 1' },
+  { id: 'c2', name: 'Công thức 2' },
+  { id: 'c3', name: 'Công thức 3' },
+  { id: 'gemini', name: 'Gemini AI' },
+  { id: 'deepseek', name: 'DeepSeek AI' },
+] as const
 
 function isAuthorized(request: NextRequest) {
   const secret = process.env.CRON_SECRET
@@ -42,6 +51,10 @@ function providerLabel(provider: AiProvider) {
   return provider === 'gemini' ? 'Gemini' : 'DeepSeek'
 }
 
+function matchingDigits(prediction: string, tail: string) {
+  return [...prediction].filter((digit, index) => digit === tail[index]).length
+}
+
 export async function GET(request: NextRequest) {
   if (!process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Cron secret is not configured.' }, { status: 503 })
@@ -51,6 +64,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    await ensureDefaultAnalysisScenarios()
     const scenarios = await db
       .select()
       .from(xsmbScenarios)
@@ -85,7 +99,13 @@ export async function GET(request: NextRequest) {
     }
 
     const recentDraws = await db
-      .select({ tail: xsmbDraws.tail })
+      .select({
+        drawDate: xsmbDraws.drawDate,
+        day: xsmbDraws.day,
+        special: xsmbDraws.special,
+        tail: xsmbDraws.tail,
+        prizes: xsmbDraws.prizes,
+      })
       .from(xsmbDraws)
       .where(eq(xsmbDraws.userId, XSMB_USER_SCOPE))
       .orderBy(desc(xsmbDraws.drawDate))
@@ -98,6 +118,71 @@ export async function GET(request: NextRequest) {
         targetDate,
         availableDraws: tails.length,
       })
+    }
+
+    const recentDates = recentDraws.map((draw) => draw.drawDate)
+    const methodIds = BASE_METHODS.map((method) => method.id)
+    const [historicalMethodPredictions, currentMethodRows] = await Promise.all([
+      db
+        .select({ targetDate: xsmbPredictions.targetDate, scenarioId: xsmbPredictions.scenarioId, prediction: xsmbPredictions.prediction })
+        .from(xsmbPredictions)
+        .where(
+          and(
+            eq(xsmbPredictions.userId, XSMB_USER_SCOPE),
+            inArray(xsmbPredictions.targetDate, recentDates),
+            inArray(xsmbPredictions.scenarioId, methodIds),
+          ),
+        ),
+      db
+        .select({ scenarioId: xsmbPredictions.scenarioId, prediction: xsmbPredictions.prediction })
+        .from(xsmbPredictions)
+        .where(
+          and(
+            eq(xsmbPredictions.userId, XSMB_USER_SCOPE),
+            eq(xsmbPredictions.targetDate, targetDate),
+            inArray(xsmbPredictions.scenarioId, methodIds),
+          ),
+        ),
+    ])
+
+    const tailByDate = new Map(recentDraws.map((draw) => [draw.drawDate, draw.tail]))
+    const methodPerformance = BASE_METHODS.map((method) => {
+      const evaluated = historicalMethodPredictions.filter(
+        (row) => row.scenarioId === method.id && tailByDate.has(row.targetDate),
+      )
+      const matchedDigits = evaluated.reduce(
+        (sum, row) => sum + matchingDigits(row.prediction, tailByDate.get(row.targetDate) ?? ''),
+        0,
+      )
+      const totalDigits = evaluated.length * 4
+      return {
+        scenarioId: method.id,
+        name: method.name,
+        matchedDigits,
+        totalDigits,
+        accuracyPercent: totalDigits ? ((matchedDigits / totalDigits) * 100).toFixed(1) : null,
+      }
+    })
+
+    const currentMethodById = new Map(currentMethodRows.map((row) => [row.scenarioId, row.prediction]))
+    const currentMethodPredictions = BASE_METHODS.map((method) => ({
+      scenarioId: method.id,
+      name: method.name,
+      prediction: method.id === 'c1' || method.id === 'c2' || method.id === 'c3'
+        ? formulaPrediction(method.id, tails)
+        : currentMethodById.get(method.id) ?? null,
+    }))
+
+    const analysisContext = {
+      draws: [...recentDraws].reverse().map((draw) => ({
+        date: draw.drawDate,
+        day: draw.day,
+        special: draw.special,
+        tail: draw.tail,
+        prizes: draw.prizes,
+      })),
+      methodPerformance,
+      currentMethodPredictions,
     }
 
     const scheduledIds = scenarios.flatMap((scenario) =>
@@ -130,6 +215,7 @@ export async function GET(request: NextRequest) {
           provider,
           targetDate,
           tails,
+          analysisContext,
           scenarios: pendingScenarios.map((scenario) => ({
             id: scenario.id,
             name: scenario.name,
@@ -137,24 +223,55 @@ export async function GET(request: NextRequest) {
           })),
         })
 
-        const inserted = await db
-          .insert(xsmbPredictions)
-          .values(pendingScenarios.map((scenario) => ({
-            userId: XSMB_USER_SCOPE,
-            targetDate,
-            scenarioId: predictionRowId(scenario.id, provider),
-            scenarioName: `${scenario.name} · ${providerLabel(provider)}`,
-            provider,
-            modelId: generated.modelId,
-            promptSnapshot: scenario.prompt,
-            prediction: generated.predictions.get(scenario.id)!
-          })))
-          .onConflictDoNothing({
-            target: [xsmbPredictions.userId, xsmbPredictions.targetDate, xsmbPredictions.scenarioId],
-          })
-          .returning({ id: xsmbPredictions.id })
+        const rows = pendingScenarios.map((scenario) => {
+          const report = generated.reports.get(scenario.id)
+          if (!report) throw new Error('Missing generated scenario report')
+          const scenarioId = predictionRowId(scenario.id, provider)
+          const scenarioName = `${scenario.name} · ${providerLabel(provider)}`
+          return {
+            prediction: {
+              userId: XSMB_USER_SCOPE,
+              targetDate,
+              scenarioId,
+              scenarioName,
+              provider,
+              modelId: generated.modelId,
+              promptSnapshot: scenario.prompt,
+              prediction: report.prediction,
+            },
+            report: {
+              userId: XSMB_USER_SCOPE,
+              targetDate,
+              scenarioId,
+              scenarioName,
+              provider,
+              modelId: generated.modelId,
+              promptSnapshot: scenario.prompt,
+              prediction: report.prediction,
+              analysis: report.analysis,
+            },
+          }
+        })
 
-        return { provider, saved: inserted.length }
+        const saved = await db.transaction(async (transaction) => {
+          const insertedPredictions = await transaction
+            .insert(xsmbPredictions)
+            .values(rows.map((row) => row.prediction))
+            .onConflictDoNothing({
+              target: [xsmbPredictions.userId, xsmbPredictions.targetDate, xsmbPredictions.scenarioId],
+            })
+            .returning({ id: xsmbPredictions.id })
+          const insertedReports = await transaction
+            .insert(xsmbAiReports)
+            .values(rows.map((row) => row.report))
+            .onConflictDoNothing({
+              target: [xsmbAiReports.userId, xsmbAiReports.targetDate, xsmbAiReports.scenarioId],
+            })
+            .returning({ id: xsmbAiReports.id })
+          return Math.min(insertedPredictions.length, insertedReports.length)
+        })
+
+        return { provider, saved }
       }),
     )
 

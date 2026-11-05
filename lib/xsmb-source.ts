@@ -16,7 +16,7 @@ const DAYS: Record<string, string> = {
   'thứ bảy': 'T7',
 }
 
-type ParsedDraw = Omit<XsmbDraw, 'predictions' | 'predictionMeta'>
+type ParsedDraw = Omit<XsmbDraw, 'predictions' | 'predictionMeta' | 'reports'>
 
 function clean(value: string) {
   return value

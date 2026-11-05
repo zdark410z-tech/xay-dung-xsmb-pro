@@ -1,9 +1,9 @@
 import { desc, eq } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { xsmbDraws, xsmbPredictions } from '@/lib/db/schema'
+import { xsmbAiReports, xsmbDraws, xsmbPredictions } from '@/lib/db/schema'
 import { syncRecentDraws, XSMB_USER_SCOPE } from '@/lib/xsmb-source'
-import type { PredictionMeta, XsmbDraw } from '@/lib/xsmb-types'
+import type { PredictionMeta, XsmbAiReport, XsmbDraw } from '@/lib/xsmb-types'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -22,7 +22,7 @@ export async function GET() {
       syncError = error instanceof Error ? error.message : 'Không thể đồng bộ dữ liệu Minh Ngọc'
     }
 
-    const [storedDraws, storedPredictions] = await Promise.all([
+    const [storedDraws, storedPredictions, storedReports] = await Promise.all([
       db
         .select()
         .from(xsmbDraws)
@@ -34,6 +34,12 @@ export async function GET() {
         .from(xsmbPredictions)
         .where(eq(xsmbPredictions.userId, XSMB_USER_SCOPE))
         .orderBy(desc(xsmbPredictions.targetDate), desc(xsmbPredictions.createdAt))
+        .limit(3000),
+      db
+        .select()
+        .from(xsmbAiReports)
+        .where(eq(xsmbAiReports.userId, XSMB_USER_SCOPE))
+        .orderBy(desc(xsmbAiReports.targetDate), desc(xsmbAiReports.createdAt))
         .limit(3000),
     ])
 
@@ -47,25 +53,52 @@ export async function GET() {
         prizes: draw.prizes,
         predictions: {},
         predictionMeta: {},
+        reports: {},
       })
     }
 
-    for (const prediction of storedPredictions) {
-      const draw = byDate.get(prediction.targetDate) ?? {
-        date: prediction.targetDate,
+    function getOrCreateDraw(date: string) {
+      const current = byDate.get(date)
+      if (current) return current
+      const created: XsmbDraw = {
+        date,
         day: '',
         special: '',
         tail: '',
         prizes: [],
         predictions: {},
-        predictionMeta: {} as Record<string, PredictionMeta>,
+        predictionMeta: {},
+        reports: {},
       }
+      byDate.set(date, created)
+      return created
+    }
+
+    for (const prediction of storedPredictions) {
+      const draw = getOrCreateDraw(prediction.targetDate)
       draw.predictions[prediction.scenarioId] = prediction.prediction
       draw.predictionMeta[prediction.scenarioId] = {
         name: prediction.scenarioName,
         provider: prediction.provider,
       }
-      byDate.set(prediction.targetDate, draw)
+    }
+
+    for (const report of storedReports) {
+      if (report.provider === 'formula') continue
+      const draw = getOrCreateDraw(report.targetDate)
+      const reportData: XsmbAiReport = {
+        name: report.scenarioName,
+        provider: report.provider,
+        modelId: report.modelId,
+        prediction: report.prediction,
+        analysis: report.analysis,
+      }
+      draw.predictions[report.scenarioId] = report.prediction
+      draw.predictionMeta[report.scenarioId] = {
+        name: report.scenarioName,
+        provider: report.provider,
+      }
+      draw.reports[report.scenarioId] = reportData
     }
 
     const draws = [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 180)

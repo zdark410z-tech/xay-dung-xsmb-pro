@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { ensureDefaultAnalysisScenarios } from '@/lib/db/seed'
 import { AI_MODELS } from '@/lib/ai-prediction'
 import { xsmbScenarios } from '@/lib/db/schema'
 import { isSameOriginRequest } from '@/lib/request-security'
@@ -51,6 +52,7 @@ function toClientScenario(row: typeof xsmbScenarios.$inferSelect): Scenario {
 
 export async function GET() {
   try {
+    await ensureDefaultAnalysisScenarios()
     const rows = await db
       .select()
       .from(xsmbScenarios)

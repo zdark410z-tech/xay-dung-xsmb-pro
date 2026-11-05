@@ -2,6 +2,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { generateSinglePrediction, getAiFailureMessage, type AiProvider } from '@/lib/ai-prediction'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { formulaPrediction } from '@/lib/xsmb-formulas'
 import { xsmbDraws, xsmbPredictions, xsmbScenarios } from '@/lib/db/schema'
 import { isSameOriginRequest } from '@/lib/request-security'
 
@@ -19,30 +20,6 @@ function isDateKey(value: unknown): value is string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const parsed = new Date(`${value}T00:00:00.000Z`)
   return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
-}
-
-function frequencyPrediction(values: string[], rank = 0) {
-  return Array.from({ length: 4 }, (_, index) => {
-    const counts: Record<string, number> = {}
-    values.forEach((value) => {
-      const digit = value[index]
-      if (digit) counts[digit] = (counts[digit] || 0) + 1
-    })
-    const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1])
-    return ranked[rank]?.[0] ?? ranked[0]?.[0] ?? '0'
-  }).join('')
-}
-
-function formulaPrediction(scenarioId: string, tails: string[]) {
-  if (scenarioId === 'c1') return frequencyPrediction(tails)
-  if (scenarioId === 'c2') return frequencyPrediction(tails, 1)
-  if (scenarioId === 'c3') {
-    return Array.from({ length: 4 }, (_, index) => {
-      const average = tails.reduce((sum, tail) => sum + Number(tail[index] ?? 0), 0) / tails.length
-      return String(Math.round(average) % 10)
-    }).join('')
-  }
-  return null
 }
 
 export async function POST(request: NextRequest) {
