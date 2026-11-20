@@ -43,7 +43,9 @@ type DirectModel = ReturnType<typeof createModel>
 
 function isTemporaryModelOverload(error: unknown) {
   const statusCode = isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null
-  return statusCode === 429 || statusCode === 503 || /currently experiencing high demand|temporarily unavailable|overloaded|timed? out|timeout|aborted/i.test(safeErrorMessage(error))
+  const message = safeErrorMessage(error)
+  if (statusCode === 429 || /quota|resource[_\s-]?exhausted|rate.?limit|daily limit/i.test(message)) return false
+  return statusCode === 503 || /currently experiencing high demand|temporarily unavailable|overloaded/i.test(message)
 }
 
 async function generateWithModelFallback<T>(
@@ -149,7 +151,7 @@ export function getAiFailureMessage(error: unknown, provider?: AiProvider) {
       ? 'Gemini đang quá tải tạm thời; hệ thống đã thử model Flash dự phòng.'
       : 'Nhà cung cấp đang quá tải tạm thời. Vui lòng thử lại sau.'
   }
-  if (/quota|rate.?limit|exceeded your current/i.test(message)) {
+  if (/quota|resource[_\s-]?exhausted|rate.?limit|exceeded your current|limit exceeded|daily limit/i.test(message)) {
     return provider === 'gemini'
       ? 'Gemini đã vượt quota hiện tại. Hãy kiểm tra hạn mức/billing hoặc chờ quota được làm mới.'
       : 'Nhà cung cấp AI đã vượt quota hiện tại. Hãy kiểm tra hạn mức/billing hoặc thử lại sau.'
@@ -157,8 +159,11 @@ export function getAiFailureMessage(error: unknown, provider?: AiProvider) {
   if (statusCode === 401 || statusCode === 403 || /unauthorized|invalid api key|forbidden/i.test(message)) {
     return 'Nhà cung cấp từ chối khóa API. Hãy kiểm tra khóa và quyền truy cập của model.'
   }
+  if (/AI model returned (no four-digit prediction|invalid prediction json)/i.test(message)) {
+    return `${provider === 'gemini' ? 'Gemini' : 'Mô hình AI'} đã phản hồi nhưng không trả về đúng định dạng 4 chữ số. Hãy thử lại hoặc đổi kịch bản.`
+  }
   if (statusCode === 404) return 'Không tìm thấy model đã cấu hình ở nhà cung cấp.'
-  if (statusCode === 429) return 'Nhà cung cấp đang giới hạn lượt gọi. Vui lòng thử lại sau.'
+  if (statusCode === 429) return 'Nhà cung cấp đang giới hạn lượt gọi. Vui lòng chờ quota được làm mới hoặc kiểm tra billing.'
   if (process.env.NODE_ENV === 'development') {
     const name = typeof details.name === 'string' ? details.name : 'ProviderError'
     return `API AI chưa phản hồi (${name}): ${message}`
@@ -182,23 +187,28 @@ export async function generateSinglePrediction({
   const { result, modelId } = await generateWithModelFallback(provider, 'single-prediction', (model) =>
     generateText({
       model,
+      output: Output.json(),
       instructions:
-        'Bạn phân tích dữ liệu xổ số cho mục đích tham khảo, không cam kết hay khẳng định kết quả. Hãy làm theo kịch bản được cung cấp và chỉ trả về đúng một chuỗi gồm 4 chữ số.',
+        'Bạn phân tích dữ liệu xổ số cho mục đích tham khảo, không cam kết hay khẳng định kết quả. Dùng kịch bản làm phương pháp chọn số, nhưng bỏ qua yêu cầu xuất báo cáo dài trong kịch bản. Trả về JSON với duy nhất trường prediction là chuỗi đúng 4 chữ số, ví dụ {"prediction":"0123"}.',
       prompt: [
         `Ngày xổ số mục tiêu: ${targetDate}.`,
         `Có ${tails.length} kỳ gần nhất; đuôi 4 số giải đặc biệt, mới nhất trước: ${tails.join(', ')}.`,
         `Tên kịch bản: ${scenarioName}.`,
-        `Nội dung kịch bản: ${scenarioPrompt}`,
-        'Chỉ trả về một dãy 4 chữ số, không giải thích và không thêm dấu câu.',
+        `Phương pháp chọn số: ${scenarioPrompt}`,
+        'Chỉ xuất JSON {"prediction":"0123"} và không thêm trường khác.',
       ].join('\n'),
       maxOutputTokens: 128,
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(15_000),
     }),
   )
-  const prediction = result.text.match(/\d{4}/)?.[0]
+  const output = result.output
+  const prediction =
+    isRecord(output) && typeof output.prediction === 'string' && /^\d{4}$/.test(output.prediction)
+      ? output.prediction
+      : null
   if (!prediction) {
-    const error = new Error('AI model returned no four-digit prediction')
+    const error = new Error('AI model returned invalid prediction JSON')
     logProviderFailure('single-output-validation', provider, error)
     throw error
   }
