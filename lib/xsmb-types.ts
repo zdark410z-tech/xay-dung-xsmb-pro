@@ -1,4 +1,4 @@
-export type ScenarioProvider = 'formula' | 'gemini' | 'deepseek'
+export type ScenarioProvider = 'formula' | 'gemini' | 'deepseek' | 'groq'
 
 export type Scenario = {
   id: string
@@ -18,7 +18,7 @@ export type PredictionMeta = {
 
 export type XsmbAiReport = {
   name: string
-  provider: Extract<ScenarioProvider, 'gemini' | 'deepseek'>
+  provider: Extract<ScenarioProvider, 'gemini' | 'deepseek' | 'groq'>
   modelId: string
   prediction: string
   analysis: string

@@ -31,7 +31,22 @@ function accuracy(scenarioId: string, draws: XsmbDraw[]) {
 function providerLabel(scenario: Scenario) {
   if (scenario.provider === 'gemini') return 'Gemini'
   if (scenario.provider === 'deepseek') return 'DeepSeek'
+  if (scenario.provider === 'groq') return 'Groq'
   return 'Công thức'
+}
+
+function summarizePredictions(predictions: Record<string, string>) {
+  const values = Object.values(predictions).filter((value) => /^\d{4}$/.test(value))
+  if (!values.length) return null
+
+  const digits = Array.from({ length: 4 }, (_, index) => {
+    const counts = new Map<string, number>()
+    for (const value of values) counts.set(value[index], (counts.get(value[index]) ?? 0) + 1)
+    return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]
+  })
+  const prediction = digits.map(([digit]) => digit).join('')
+  const supportedPositions = digits.reduce((total, [, count]) => total + count, 0)
+  return { prediction, agreement: Math.round((supportedPositions / (values.length * 4)) * 100), count: values.length }
 }
 
 export function HistoryPanel({
@@ -59,7 +74,7 @@ export function HistoryPanel({
         <div>
           <p className="eyebrow">TỔNG QUAN HIỆU SUẤT</p>
           <h2 id="history-title">Lịch sử & đối chiếu</h2>
-          <p className="section-intro">Dự đoán được lưu theo ngày; kết quả sẽ tự đối chiếu khi có kỳ xổ số.</p>
+          <p className="section-intro">Dự đoán được lưu theo ngày; kết quả tự đối chiếu và phần tổng hợp cuối dùng đa số từng chữ số khi có dữ liệu.</p>
         </div>
         <div className="history-actions">
           <span className={`live ${syncError || loadError ? 'sync-error' : ''}`} role="status">
@@ -77,7 +92,7 @@ export function HistoryPanel({
             const stat = accuracy(scenario.id, draws)
             const color = scenario.provider === 'formula'
               ? scenario.id === 'c2' ? 'green' : scenario.id === 'c3' ? 'blue' : 'red'
-              : scenario.provider === 'deepseek' ? 'cyan' : 'purple'
+              : scenario.provider === 'groq' ? 'green' : scenario.provider === 'deepseek' ? 'cyan' : 'purple'
 
             return (
               <article className={`stat-card ${color}`} key={scenario.id}>
@@ -118,6 +133,7 @@ export function HistoryPanel({
       {draws.map((draw) => {
         const hasResult = /^\d{4}$/.test(draw.tail)
         const reports = Object.entries(draw.reports ?? {})
+        const finalSummary = summarizePredictions(draw.predictions)
         return (
           <article className="draw-card" key={draw.date}>
             <div className="draw-header">
@@ -185,6 +201,25 @@ export function HistoryPanel({
               {scenarios.length === 0 && <p className="no-scenarios">Chưa có kịch bản để đối chiếu.</p>}
             </div>
 
+            {finalSummary && (
+              <section className="final-summary" aria-label={`Tổng hợp dự đoán ngày ${formatDate(draw.date)}`}>
+                <div className="final-summary-number">
+                  <span>TỔNG HỢP CUỐI</span>
+                  <strong aria-label={`Số tổng hợp ${finalSummary.prediction}`}>
+                    {[...finalSummary.prediction].map((digit, index) => <i key={`${draw.date}-summary-${index}`}>{digit}</i>)}
+                  </strong>
+                </div>
+                <div className="final-summary-agreement">
+                  <span>Đồng thuận {finalSummary.count} dự đoán</span>
+                  <b>{finalSummary.agreement}%</b>
+                </div>
+                {hasResult && (
+                  <p>Đối chiếu kết quả: {[...finalSummary.prediction].filter((digit, index) => digit === draw.tail[index]).length}/4 chữ số khớp</p>
+                )}
+                <small>Tổng hợp theo đa số từng vị trí; đây không phải xác suất trúng.</small>
+              </section>
+            )}
+
             {reports.length > 0 && (
               <details className="analysis-details">
                 <summary>Xem phân tích AI chi tiết ({reports.length})</summary>
@@ -194,7 +229,7 @@ export function HistoryPanel({
                       <div className="analysis-report-heading">
                         <div>
                           <strong>{report.name}</strong>
-                          <small>{report.provider === 'gemini' ? 'Gemini' : 'DeepSeek'} · {report.modelId}</small>
+                          <small>{report.provider === 'gemini' ? 'Gemini' : report.provider === 'groq' ? 'Groq' : 'DeepSeek'} · {report.modelId}</small>
                         </div>
                         <b>{report.prediction}</b>
                       </div>
