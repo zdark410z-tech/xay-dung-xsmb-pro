@@ -13,12 +13,12 @@ export const runtime = 'nodejs'
 export const maxDuration = 60
 
 const REQUIRED_SCENARIOS = 6
-const PROVIDERS: AiProvider[] = ['gemini', 'deepseek']
+const PROVIDERS: AiProvider[] = ['groq', 'deepseek']
 const BASE_METHODS = [
   { id: 'c1', name: 'Công thức 1' },
   { id: 'c2', name: 'Công thức 2' },
   { id: 'c3', name: 'Công thức 3' },
-  { id: 'gemini', name: 'Gemini AI' },
+  { id: 'groq', name: 'Groq AI' },
   { id: 'deepseek', name: 'DeepSeek AI' },
 ] as const
 
@@ -48,6 +48,7 @@ function predictionRowId(scenarioId: string, provider: AiProvider) {
 }
 
 function providerLabel(provider: AiProvider) {
+  if (provider === 'groq') return 'Groq'
   return provider === 'gemini' ? 'Gemini' : 'DeepSeek'
 }
 
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
           eq(xsmbScenarios.userId, XSMB_USER_SCOPE),
           eq(xsmbScenarios.isActive, true),
           eq(xsmbScenarios.isBuiltin, false),
-          inArray(xsmbScenarios.provider, ['gemini', 'deepseek']),
+          inArray(xsmbScenarios.provider, ['gemini', 'deepseek', 'groq']),
         ),
       )
       .orderBy(xsmbScenarios.sortOrder)

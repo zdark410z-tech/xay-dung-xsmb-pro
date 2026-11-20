@@ -1,13 +1,15 @@
 import { createDeepSeek } from '@ai-sdk/deepseek'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGroq } from '@ai-sdk/groq'
 import { generateText, Output } from 'ai'
 import type { ScenarioProvider } from '@/lib/xsmb-types'
 
-export type AiProvider = Extract<ScenarioProvider, 'gemini' | 'deepseek'>
+export type AiProvider = Extract<ScenarioProvider, 'gemini' | 'deepseek' | 'groq'>
 
 export const AI_MODELS = {
   gemini: 'gemini-3.8-flash',
   deepseek: 'deepseek-v4-flash',
+  groq: 'llama-3.3-70b-versatile',
 } as const
 
 const GEMINI_FALLBACK_MODEL = 'gemini-3.5-flash'
@@ -21,9 +23,15 @@ export class MissingProviderApiKeyError extends Error {
 
 function createModel(provider: AiProvider, modelId: string = AI_MODELS[provider]) {
   if (provider === 'gemini') {
-    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY
     if (!apiKey) throw new MissingProviderApiKeyError(provider)
     return createGoogleGenerativeAI({ apiKey })(modelId)
+  }
+
+  if (provider === 'groq') {
+    const apiKey = process.env.GROQ_API_KEY
+    if (!apiKey) throw new MissingProviderApiKeyError(provider)
+    return createGroq({ apiKey })(modelId)
   }
 
   const apiKey = process.env.DEEPSEEK_API_KEY
@@ -45,7 +53,7 @@ async function generateWithModelFallback<T>(
 ) {
   const modelIds: string[] = provider === 'gemini'
     ? [AI_MODELS.gemini, GEMINI_FALLBACK_MODEL]
-    : [AI_MODELS.deepseek]
+    : [AI_MODELS[provider]]
 
   for (let index = 0; index < modelIds.length; index += 1) {
     const modelId = modelIds[index]
@@ -123,16 +131,18 @@ function logProviderFailure(operation: string, provider: AiProvider, error: unkn
 
 export function getAiFailureMessage(error: unknown, provider?: AiProvider) {
   if (error instanceof MissingProviderApiKeyError) {
-    return error.provider === 'gemini'
-      ? 'Chưa cấu hình GOOGLE_GENERATIVE_AI_API_KEY trong Vars của project.'
-      : 'Chưa cấu hình DEEPSEEK_API_KEY trong Vars của project.'
+    if (error.provider === 'gemini') return 'Chưa cấu hình GEMINI_API_KEY trong Vars của project.'
+    if (error.provider === 'groq') return 'Chưa cấu hình GROQ_API_KEY trong Vars của project.'
+    return 'Chưa cấu hình DEEPSEEK_API_KEY trong Vars của project.'
   }
 
   const details = isRecord(error) ? error : {}
   const statusCode = typeof details.statusCode === 'number' ? details.statusCode : null
   const message = safeErrorMessage(error)
   if (/insufficient balance|low balance|balance is not enough/i.test(message)) {
-    return 'DeepSeek báo số dư API không đủ. Hãy nạp số dư hoặc kiểm tra billing của tài khoản DeepSeek.'
+    return provider === 'groq'
+      ? 'Groq đang giới hạn lượt gọi hoặc tài khoản không đủ điều kiện. Hãy kiểm tra giới hạn tại GroqCloud.'
+      : 'DeepSeek báo số dư API không đủ. Hãy nạp số dư hoặc kiểm tra billing của tài khoản DeepSeek.'
   }
   if (/high demand|overloaded|temporarily unavailable/i.test(message)) {
     return provider === 'gemini'

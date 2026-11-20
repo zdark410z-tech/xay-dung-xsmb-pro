@@ -25,12 +25,14 @@ function colorFor(scenario: Scenario) {
   if (scenario.provider === 'formula') {
     return scenario.id === 'c2' ? 'green' : scenario.id === 'c3' ? 'blue' : 'red'
   }
+  if (scenario.provider === 'groq') return 'green'
   return scenario.provider === 'deepseek' ? 'cyan' : 'purple'
 }
 
 function modelLabel(scenario: Scenario) {
   if (scenario.provider === 'gemini') return 'Gemini API · server-side'
   if (scenario.provider === 'deepseek') return 'DeepSeek API · server-side'
+  if (scenario.provider === 'groq') return 'Groq API · server-side'
   return 'Công thức nội bộ'
 }
 

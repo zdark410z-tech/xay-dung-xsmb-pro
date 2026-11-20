@@ -7,7 +7,7 @@ import type { Scenario } from '@/lib/xsmb-types'
 type Draft = {
   name: string
   prompt: string
-  provider: 'gemini' | 'deepseek'
+  provider: 'gemini' | 'deepseek' | 'groq'
 }
 
 type Props = {
@@ -31,12 +31,13 @@ async function sendScenarioRequest(method: 'POST' | 'PATCH' | 'DELETE', body: Re
 function providerName(provider: string) {
   if (provider === 'gemini') return 'Gemini'
   if (provider === 'deepseek') return 'DeepSeek'
+  if (provider === 'groq') return 'Groq'
   return 'Công thức'
 }
 
 export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Props) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
-  const [newScenario, setNewScenario] = useState<Draft>({ name: '', prompt: '', provider: 'gemini' })
+  const [newScenario, setNewScenario] = useState<Draft>({ name: '', prompt: '', provider: 'groq' })
   const [savingId, setSavingId] = useState<string | null>(null)
   const [savingNew, setSavingNew] = useState(false)
   const [message, setMessage] = useState('')
@@ -45,7 +46,7 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
     return drafts[scenario.id] ?? {
       name: scenario.name,
       prompt: scenario.prompt,
-      provider: scenario.provider === 'deepseek' ? 'deepseek' : 'gemini',
+      provider: scenario.provider === 'deepseek' || scenario.provider === 'groq' ? scenario.provider : 'gemini',
     }
   }
 
@@ -84,7 +85,7 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
     setMessage('')
     try {
       await sendScenarioRequest('POST', newScenario)
-      setNewScenario({ name: '', prompt: '', provider: 'gemini' })
+      setNewScenario({ name: '', prompt: '', provider: 'groq' })
       await onChanged()
       setMessage('Đã thêm kịch bản mới. Kịch bản sẽ xuất hiện trong phần dự đoán và lịch sử đối chiếu.')
     } catch (error) {
@@ -115,7 +116,7 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
         <div>
           <p className="eyebrow">CẤU HÌNH HỆ THỐNG</p>
           <h2 id="scenario-title">Kịch bản & API</h2>
-          <p className="section-intro">Thêm nhiều cách phân tích; mỗi kịch bản có thể chạy bằng Gemini hoặc DeepSeek.</p>
+          <p className="section-intro">Thêm kịch bản phân tích và chọn Groq, Gemini hoặc DeepSeek cho từng kịch bản.</p>
         </div>
       </div>
 
@@ -123,8 +124,8 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
         <div className="config-note" role="note">
           <span className="gateway-indicator" aria-hidden="true" />
           <div>
-            <strong>Gemini và DeepSeek chạy phía máy chủ bằng khóa API riêng.</strong>
-            <p>Thêm khóa trong Vars bảo mật của project; không dán khóa vào trang này, chat, hoặc mã nguồn.</p>
+            <strong>Groq, Gemini và DeepSeek chạy phía máy chủ bằng khóa API riêng.</strong>
+            <p>Project dùng biến GROQ_API_KEY, GEMINI_API_KEY và DEEPSEEK_API_KEY; khóa chỉ được đọc phía máy chủ, không dán vào trang này hoặc mã nguồn.</p>
           </div>
         </div>
 
@@ -132,7 +133,7 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
           <span className="gateway-indicator" aria-hidden="true" />
           <div>
             <strong>Lịch dự kiến: 10:00 mỗi ngày, giờ Việt Nam.</strong>
-            <p>Khi có đúng 6 kịch bản tùy chỉnh và CRON_SECRET, mỗi kịch bản sẽ được phân tích riêng bởi cả Gemini lẫn DeepSeek; 12 kết quả sẽ lưu vào lịch sử. Đây là suy luận hằng ngày, không phải huấn luyện lại mô hình.</p>
+            <p>Khi có đúng 6 kịch bản tùy chỉnh và CRON_SECRET, hệ thống gửi từng kịch bản đến Groq và DeepSeek lúc 10:00 giờ Việt Nam; 12 kết quả được lưu vào lịch sử. Gemini vẫn có thể chọn thủ công. Đây là suy luận hằng ngày, không phải huấn luyện lại mô hình.</p>
           </div>
         </div>
 
@@ -189,6 +190,7 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
                       >
                         <option value="gemini">Gemini</option>
                         <option value="deepseek">DeepSeek</option>
+                        <option value="groq">Groq (mặc định)</option>
                       </select>
                     </label>
                   )}
@@ -251,6 +253,7 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
               >
                 <option value="gemini">Gemini</option>
                 <option value="deepseek">DeepSeek</option>
+                        <option value="groq">Groq (mặc định)</option>
               </select>
             </label>
             <label className="scenario-prompt-field">

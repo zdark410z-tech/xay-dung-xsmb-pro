@@ -33,8 +33,8 @@ async function readBody(request: NextRequest): Promise<ScenarioBody | null> {
   }
 }
 
-function isAiProvider(value: unknown): value is 'gemini' | 'deepseek' {
-  return value === 'gemini' || value === 'deepseek'
+function isAiProvider(value: unknown): value is 'gemini' | 'deepseek' | 'groq' {
+  return value === 'gemini' || value === 'deepseek' || value === 'groq'
 }
 
 function toClientScenario(row: typeof xsmbScenarios.$inferSelect): Scenario {
