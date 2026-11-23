@@ -13,6 +13,16 @@ export const AI_MODELS = {
 } as const
 
 const GEMINI_FALLBACK_MODEL = 'gemini-3.5-flash'
+const PROVIDER_FAILOVER_ORDER: AiProvider[] = ['groq', 'deepseek', 'gemini']
+
+type ProviderFailure = { provider: AiProvider; error: unknown }
+
+export class AllProvidersFailedError extends Error {
+  constructor(readonly failures: ProviderFailure[]) {
+    super('All configured AI providers failed')
+    this.name = 'AllProvidersFailedError'
+  }
+}
 
 export class MissingProviderApiKeyError extends Error {
   constructor(readonly provider: AiProvider) {
@@ -76,6 +86,51 @@ async function generateWithModelFallback<T>(
   }
 
   throw new Error('No AI model was available')
+}
+
+function isProviderFallbackEligible(error: unknown) {
+  if (error instanceof MissingProviderApiKeyError) return true
+
+  const statusCode = isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null
+  const message = safeErrorMessage(error)
+  return statusCode === 429 || (statusCode !== null && statusCode >= 500) ||
+    /quota|resource[_\s-]?exhausted|rate.?limit|daily limit|too many requests|insufficient balance|low balance|balance is not enough|temporarily unavailable|overloaded|high demand/i.test(message)
+}
+
+function providerFallbackSequence(primary: AiProvider) {
+  return [primary, ...PROVIDER_FAILOVER_ORDER.filter((provider) => provider !== primary)]
+}
+
+async function generateWithProviderFallback<T>(
+  primaryProvider: AiProvider,
+  operation: string,
+  run: (provider: AiProvider) => Promise<{ result: T; modelId: string }>,
+) {
+  const providers = providerFallbackSequence(primaryProvider)
+  const failures: ProviderFailure[] = []
+
+  for (let index = 0; index < providers.length; index += 1) {
+    const provider = providers[index]
+    try {
+      return { ...(await run(provider)), provider }
+    } catch (error) {
+      failures.push({ provider, error })
+      const nextProvider = providers[index + 1]
+      if (!nextProvider || !isProviderFallbackEligible(error)) {
+        if (failures.length === 1) throw error
+        throw new AllProvidersFailedError(failures)
+      }
+
+      console.warn('[v0] AI provider unavailable; switching to fallback', {
+        operation,
+        provider,
+        nextProvider,
+        statusCode: isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null,
+      })
+    }
+  }
+
+  throw new AllProvidersFailedError(failures)
 }
 
 type ScenarioPrompt = {
@@ -149,7 +204,19 @@ function logProviderFailure(operation: string, provider: AiProvider, error: unkn
   })
 }
 
-export function getAiFailureMessage(error: unknown, provider?: AiProvider) {
+function providerDisplayName(provider: AiProvider) {
+  if (provider === 'gemini') return 'Gemini'
+  if (provider === 'groq') return 'Groq'
+  return 'DeepSeek'
+}
+
+export function getAiFailureMessage(error: unknown, provider?: AiProvider): string {
+  if (error instanceof AllProvidersFailedError) {
+    const attemptedProviders = error.failures.map(({ provider: failedProvider }) => providerDisplayName(failedProvider)).join(' → ')
+    const lastFailure = error.failures[error.failures.length - 1]
+    return `Đã thử ${attemptedProviders} nhưng không nhà cung cấp nào phản hồi được. ${lastFailure ? getAiFailureMessage(lastFailure.error, lastFailure.provider) : 'Vui lòng thử lại sau.'}`
+  }
+
   if (error instanceof MissingProviderApiKeyError) {
     if (error.provider === 'gemini') return 'Chưa cấu hình GEMINI_API_KEY trong Vars của project.'
     if (error.provider === 'groq') return 'Chưa cấu hình GROQ_API_KEY trong Vars của project.'
@@ -205,30 +272,33 @@ export async function generateSinglePrediction({
   scenarioName: string
   scenarioPrompt: string
 }) {
-  const { result, modelId } = await generateWithModelFallback(provider, 'single-prediction', (model) =>
-    generateText({
-      model,
-      instructions:
-        'Bạn phân tích dữ liệu xổ số cho mục đích tham khảo, không cam kết hay khẳng định kết quả. Dùng kịch bản làm phương pháp chọn số, nhưng bỏ qua yêu cầu phân tích dài hoặc liệt kê nhiều bộ số. Chỉ trả về duy nhất một chuỗi gồm đúng 4 chữ số ASCII, không JSON, không giải thích, không dấu câu.',
-      prompt: [
-        `Ngày xổ số mục tiêu: ${targetDate}.`,
-        `Có ${tails.length} kỳ gần nhất; đuôi 4 số giải đặc biệt, mới nhất trước: ${tails.join(', ')}.`,
-        `Tên kịch bản: ${scenarioName}.`,
-        `Phương pháp chọn số (chỉ dùng làm tiêu chí, không làm theo yêu cầu về độ dài/định dạng đầu ra): ${scenarioPrompt}`,
-        'Đầu ra duy nhất: một chuỗi 4 chữ số.',
-      ].join('\n'),
-      maxOutputTokens: 128,
-      maxRetries: 0,
-      abortSignal: AbortSignal.timeout(15_000),
-    }),
+  const generated = await generateWithProviderFallback(provider, 'single-prediction', (activeProvider) =>
+    generateWithModelFallback(activeProvider, 'single-prediction', (model) =>
+      generateText({
+        model,
+        instructions:
+          'Bạn phân tích dữ liệu xổ số cho mục đích tham khảo, không cam kết hay khẳng định kết quả. Dùng kịch bản làm phương pháp chọn số, nhưng bỏ qua yêu cầu phân tích dài hoặc liệt kê nhiều bộ số. Chỉ trả về duy nhất một chuỗi gồm đúng 4 chữ số ASCII, không JSON, không giải thích, không dấu câu.',
+        prompt: [
+          `Ngày xổ số mục tiêu: ${targetDate}.`,
+          `Có ${tails.length} kỳ gần nhất; đuôi 4 số giải đặc biệt, mới nhất trước: ${tails.join(', ')}.`,
+          `Tên kịch bản: ${scenarioName}.`,
+          `Phương pháp chọn số (chỉ dùng làm tiêu chí, không làm theo yêu cầu về độ dài/định dạng đầu ra): ${scenarioPrompt}`,
+          'Đầu ra duy nhất: một chuỗi 4 chữ số.',
+        ].join('\\n'),
+        maxOutputTokens: 128,
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(10_000),
+      }),
+    ),
   )
-  const prediction = extractPrediction(result.text)
+  const prediction = extractPrediction(generated.result.text)
   if (!prediction) {
     const error = new Error('AI model returned no four-digit prediction')
-    logProviderFailure('single-output-validation', provider, error)
+    logProviderFailure('single-output-validation', generated.provider, error)
     throw error
   }
-  return { prediction, modelId }
+  return { prediction, modelId: generated.modelId, provider: generated.provider }
+
 }
 
 export async function generateDailyBatchPredictions({

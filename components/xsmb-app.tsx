@@ -6,7 +6,7 @@ import { BarChart3, ClipboardList, Settings, WandSparkles } from 'lucide-react'
 import { HistoryPanel } from '@/components/history-panel'
 import { PredictionPanel } from '@/components/prediction-panel'
 import { ScenarioPanel } from '@/components/scenario-panel'
-import type { Scenario, XsmbHistoryResponse } from '@/lib/xsmb-types'
+import type { Scenario, ScenarioProvider, XsmbHistoryResponse } from '@/lib/xsmb-types'
 
 type Props = {
   todayDate: string
@@ -14,7 +14,7 @@ type Props = {
 }
 
 type ScenarioResponse = { scenarios: Scenario[] }
-type PredictionResponse = { prediction: string; alreadySaved?: boolean }
+type PredictionResponse = { prediction: string; provider?: ScenarioProvider; alreadySaved?: boolean }
 type Tab = 'history' | 'predict' | 'config'
 
 async function fetcher<T>(url: string): Promise<T> {
@@ -36,6 +36,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
   const [runningId, setRunningId] = useState<string | null>(null)
   const [message, setMessage] = useState('Chọn ngày mục tiêu và kịch bản để lưu dự đoán vào lịch sử.')
   const [optimisticResults, setOptimisticResults] = useState<Record<string, Record<string, string>>>({})
+  const [optimisticProviders, setOptimisticProviders] = useState<Record<string, Record<string, ScenarioProvider>>>({})
 
   const {
     data: historyData,
@@ -78,6 +79,10 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
 
   const historyForTarget = draws.find((draw) => draw.date === targetDate)
   const results = { ...historyForTarget?.predictions, ...optimisticResults[targetDate] }
+  const resultProviders = {
+    ...Object.fromEntries(Object.entries(historyForTarget?.predictionMeta ?? {}).map(([id, meta]) => [id, meta.provider])),
+    ...optimisticProviders[targetDate],
+  }
 
   async function syncHistory() {
     setSyncing(true)
@@ -98,20 +103,34 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenarioId: scenario.id, targetDate }),
-        signal: AbortSignal.timeout(35_000),
+        signal: AbortSignal.timeout(43_000),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error ?? 'Không thể tạo dự đoán.')
 
       const result = payload as PredictionResponse
+      const actualProvider = result.provider ?? scenario.provider
+      const providerNames: Record<ScenarioProvider, string> = {
+        formula: 'công thức nội bộ',
+        gemini: 'Gemini',
+        deepseek: 'DeepSeek',
+        groq: 'Groq',
+      }
+      const providerNote = actualProvider !== scenario.provider
+        ? ` (đã chuyển sang ${providerNames[actualProvider]} do quota hoặc quá tải)`
+        : ` (${providerNames[actualProvider]})`
       setOptimisticResults((current) => ({
         ...current,
         [targetDate]: { ...current[targetDate], [scenario.id]: result.prediction },
       }))
+      setOptimisticProviders((current) => ({
+        ...current,
+        [targetDate]: { ...current[targetDate], [scenario.id]: actualProvider },
+      }))
       setMessage(
         result.alreadySaved
-          ? `${scenario.name}: đã có dự đoán ${result.prediction} cho ngày ${formatVietnamDate(targetDate)}.`
-          : `Đã lưu ${scenario.name}: ${result.prediction} cho ngày ${formatVietnamDate(targetDate)}.`,
+          ? `${scenario.name}: đã có dự đoán ${result.prediction} cho ngày ${formatVietnamDate(targetDate)} (${providerNames[actualProvider]}).`
+          : `Đã lưu ${scenario.name}: ${result.prediction} cho ngày ${formatVietnamDate(targetDate)}${providerNote}.`,
       )
       void mutateHistory()
     } catch (error) {
@@ -180,6 +199,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
           targetDate={targetDate}
           todayDate={todayDate}
           results={results}
+          resultProviders={resultProviders}
           runningId={runningId}
           message={message}
           onTargetDateChange={(date) => setTargetDate(date)}
