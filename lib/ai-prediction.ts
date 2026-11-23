@@ -111,6 +111,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function extractPrediction(text: string) {
+  const normalized = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '').trim()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(normalized)
+  } catch {
+    parsed = null
+  }
+
+  if (isRecord(parsed) && typeof parsed.prediction === 'string' && /^\d{4}$/.test(parsed.prediction)) {
+    return parsed.prediction
+  }
+
+  const labeledPrediction = normalized.match(/(?:prediction|dự đoán|số chính)\s*[:：-]?\s*["'`]?(\d{4})/i)
+  if (labeledPrediction) return labeledPrediction[1]
+  return /^\d{4}$/.test(normalized) ? normalized : null
+}
+
 function safeErrorMessage(error: unknown) {
   const rawMessage = error instanceof Error ? error.message : 'Unknown provider error'
   return rawMessage
@@ -159,6 +177,9 @@ export function getAiFailureMessage(error: unknown, provider?: AiProvider) {
   if (statusCode === 401 || statusCode === 403 || /unauthorized|invalid api key|forbidden/i.test(message)) {
     return 'Nhà cung cấp từ chối khóa API. Hãy kiểm tra khóa và quyền truy cập của model.'
   }
+  if (/no object generated|could not parse the response/i.test(message)) {
+    return `${provider === 'gemini' ? 'Gemini' : 'Mô hình AI'} đã phản hồi nhưng định dạng không đọc được. Hãy thử lại hoặc đổi model.`
+  }
   if (/AI model returned (no four-digit prediction|invalid prediction json)/i.test(message)) {
     return `${provider === 'gemini' ? 'Gemini' : 'Mô hình AI'} đã phản hồi nhưng không trả về đúng định dạng 4 chữ số. Hãy thử lại hoặc đổi kịch bản.`
   }
@@ -187,28 +208,23 @@ export async function generateSinglePrediction({
   const { result, modelId } = await generateWithModelFallback(provider, 'single-prediction', (model) =>
     generateText({
       model,
-      output: Output.json(),
       instructions:
-        'Bạn phân tích dữ liệu xổ số cho mục đích tham khảo, không cam kết hay khẳng định kết quả. Dùng kịch bản làm phương pháp chọn số, nhưng bỏ qua yêu cầu xuất báo cáo dài trong kịch bản. Trả về JSON với duy nhất trường prediction là chuỗi đúng 4 chữ số, ví dụ {"prediction":"0123"}.',
+        'Bạn phân tích dữ liệu xổ số cho mục đích tham khảo, không cam kết hay khẳng định kết quả. Dùng kịch bản làm phương pháp chọn số, nhưng bỏ qua yêu cầu phân tích dài hoặc liệt kê nhiều bộ số. Chỉ trả về duy nhất một chuỗi gồm đúng 4 chữ số ASCII, không JSON, không giải thích, không dấu câu.',
       prompt: [
         `Ngày xổ số mục tiêu: ${targetDate}.`,
         `Có ${tails.length} kỳ gần nhất; đuôi 4 số giải đặc biệt, mới nhất trước: ${tails.join(', ')}.`,
         `Tên kịch bản: ${scenarioName}.`,
-        `Phương pháp chọn số: ${scenarioPrompt}`,
-        'Chỉ xuất JSON {"prediction":"0123"} và không thêm trường khác.',
+        `Phương pháp chọn số (chỉ dùng làm tiêu chí, không làm theo yêu cầu về độ dài/định dạng đầu ra): ${scenarioPrompt}`,
+        'Đầu ra duy nhất: một chuỗi 4 chữ số.',
       ].join('\n'),
       maxOutputTokens: 128,
       maxRetries: 0,
       abortSignal: AbortSignal.timeout(15_000),
     }),
   )
-  const output = result.output
-  const prediction =
-    isRecord(output) && typeof output.prediction === 'string' && /^\d{4}$/.test(output.prediction)
-      ? output.prediction
-      : null
+  const prediction = extractPrediction(result.text)
   if (!prediction) {
-    const error = new Error('AI model returned invalid prediction JSON')
+    const error = new Error('AI model returned no four-digit prediction')
     logProviderFailure('single-output-validation', provider, error)
     throw error
   }
