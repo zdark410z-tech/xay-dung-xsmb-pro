@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     }
 
     const [existing] = await db
-      .select({ prediction: xsmbPredictions.prediction })
+      .select({ prediction: xsmbPredictions.prediction, provider: xsmbPredictions.provider })
       .from(xsmbPredictions)
       .where(
         and(
@@ -72,6 +72,7 @@ export async function POST(request: NextRequest) {
     if (existing) {
       return NextResponse.json({
         prediction: existing.prediction,
+        provider: existing.provider,
         scenarioId: scenario.id,
         targetDate,
         alreadySaved: true,
@@ -92,6 +93,7 @@ export async function POST(request: NextRequest) {
 
     let prediction: string | null = null
     let modelId: string | null = scenario.modelId
+    let activeProvider: AiProvider | 'formula' = scenario.provider as AiProvider | 'formula'
 
     if (scenario.provider === 'formula') {
       prediction = formulaPrediction(scenario.id, tails)
@@ -99,6 +101,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Kịch bản công thức không được hỗ trợ.' }, { status: 400 })
       }
       modelId = null
+      activeProvider = 'formula'
     } else {
       try {
         const result = await generateSinglePrediction({
@@ -110,8 +113,9 @@ export async function POST(request: NextRequest) {
         })
         prediction = result.prediction
         modelId = result.modelId
+        activeProvider = result.provider
       } catch (error) {
-        return NextResponse.json({ error: getAiFailureMessage(error, scenario.provider) }, { status: 502 })
+        return NextResponse.json({ error: getAiFailureMessage(error, scenario.provider as AiProvider) }, { status: 502 })
       }
     }
 
@@ -122,7 +126,7 @@ export async function POST(request: NextRequest) {
         targetDate,
         scenarioId: scenario.id,
         scenarioName: scenario.name,
-        provider: scenario.provider,
+        provider: activeProvider,
         modelId,
         promptSnapshot: scenario.prompt,
         prediction,
@@ -130,14 +134,14 @@ export async function POST(request: NextRequest) {
       .onConflictDoNothing({
         target: [xsmbPredictions.userId, xsmbPredictions.targetDate, xsmbPredictions.scenarioId],
       })
-      .returning({ prediction: xsmbPredictions.prediction })
+      .returning({ prediction: xsmbPredictions.prediction, provider: xsmbPredictions.provider })
 
     if (inserted) {
-      return NextResponse.json({ prediction: inserted.prediction, scenarioId: scenario.id, targetDate })
+      return NextResponse.json({ prediction: inserted.prediction, provider: inserted.provider, scenarioId: scenario.id, targetDate })
     }
 
     const [saved] = await db
-      .select({ prediction: xsmbPredictions.prediction })
+      .select({ prediction: xsmbPredictions.prediction, provider: xsmbPredictions.provider })
       .from(xsmbPredictions)
       .where(
         and(
@@ -150,6 +154,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       prediction: saved?.prediction ?? prediction,
+      provider: saved?.provider ?? activeProvider,
       scenarioId: scenario.id,
       targetDate,
       alreadySaved: true,

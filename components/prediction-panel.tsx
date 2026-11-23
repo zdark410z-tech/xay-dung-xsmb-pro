@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Brain, Calculator, Sparkles, Target } from 'lucide-react'
-import type { Scenario, XsmbDraw } from '@/lib/xsmb-types'
+import type { Scenario, ScenarioProvider, XsmbDraw } from '@/lib/xsmb-types'
 
 type Props = {
   scenarios: Scenario[]
@@ -10,6 +10,7 @@ type Props = {
   targetDate: string
   todayDate: string
   results: Record<string, string>
+  resultProviders: Record<string, ScenarioProvider>
   runningId: string | null
   message: string
   onTargetDateChange: (date: string) => void
@@ -21,18 +22,18 @@ function formatDate(date: string) {
   return year && month && day ? `${day}/${month}/${year}` : date
 }
 
-function colorFor(scenario: Scenario) {
-  if (scenario.provider === 'formula') {
+function colorFor(scenario: Scenario, provider: ScenarioProvider = scenario.provider) {
+  if (provider === 'formula') {
     return scenario.id === 'c2' ? 'green' : scenario.id === 'c3' ? 'blue' : 'red'
   }
-  if (scenario.provider === 'groq') return 'green'
-  return scenario.provider === 'deepseek' ? 'cyan' : 'purple'
+  if (provider === 'groq') return 'green'
+  return provider === 'deepseek' ? 'cyan' : 'purple'
 }
 
-function modelLabel(scenario: Scenario) {
-  if (scenario.provider === 'gemini') return 'Gemini API · server-side'
-  if (scenario.provider === 'deepseek') return 'DeepSeek API · server-side'
-  if (scenario.provider === 'groq') return 'Groq API · server-side'
+function modelLabel(provider: ScenarioProvider) {
+  if (provider === 'gemini') return 'Gemini API · server-side'
+  if (provider === 'deepseek') return 'DeepSeek API · server-side'
+  if (provider === 'groq') return 'Groq API · server-side'
   return 'Công thức nội bộ'
 }
 
@@ -42,6 +43,7 @@ export function PredictionPanel({
   targetDate,
   todayDate,
   results,
+  resultProviders,
   runningId,
   message,
   onTargetDateChange,
@@ -111,7 +113,8 @@ export function PredictionPanel({
 
       <div className="prediction-grid">
         {scenarios.map((scenario) => {
-          const color = colorFor(scenario)
+          const actualProvider = resultProviders[scenario.id] ?? scenario.provider
+          const color = colorFor(scenario, actualProvider)
           const prediction = results[scenario.id] ?? ''
           return (
             <article className="prediction-card" key={scenario.id}>
@@ -119,7 +122,7 @@ export function PredictionPanel({
                 <span className={`icon-bubble ${color}`}><Brain aria-hidden="true" size={16} /></span>
                 <div>
                   <b>{scenario.name}</b>
-                  <small>{modelLabel(scenario)}</small>
+                  <small>{modelLabel(actualProvider)}{actualProvider !== scenario.provider ? ' · dự phòng' : ''}</small>
                 </div>
               </div>
               <strong>{prediction || '----'}</strong>
