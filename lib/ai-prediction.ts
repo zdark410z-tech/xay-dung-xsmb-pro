@@ -93,8 +93,9 @@ function isProviderFallbackEligible(error: unknown) {
 
   const statusCode = isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null
   const message = safeErrorMessage(error)
-  return statusCode === 429 || (statusCode !== null && statusCode >= 500) ||
-    /quota|resource[_\s-]?exhausted|rate.?limit|daily limit|too many requests|insufficient balance|low balance|balance is not enough|temporarily unavailable|overloaded|high demand/i.test(message)
+  const isRequestTimeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+  return statusCode === 429 || (statusCode !== null && statusCode >= 500) || isRequestTimeout ||
+    /timeout|timed out|aborted|fetch failed|network error|econnreset|eai_again|enotfound|econnrefused|socket hang up|quota|resource[_\s-]?exhausted|rate.?limit|daily limit|too many requests|insufficient balance|low balance|balance is not enough|temporarily unavailable|overloaded|high demand/i.test(message)
 }
 
 function providerFallbackSequence(primary: AiProvider) {
