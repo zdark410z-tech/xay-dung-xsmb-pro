@@ -31,6 +31,13 @@ export class MissingProviderApiKeyError extends Error {
   }
 }
 
+class InvalidPredictionOutputError extends Error {
+  constructor() {
+    super('AI model returned no four-digit prediction')
+    this.name = 'InvalidPredictionOutputError'
+  }
+}
+
 function createModel(provider: AiProvider, modelId: string = AI_MODELS[provider]) {
   if (provider === 'gemini') {
     const apiKey = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY
@@ -73,8 +80,10 @@ async function generateWithModelFallback<T>(
       return { result: await run(createModel(provider, modelId)), modelId }
     } catch (error) {
       const hasFallback = index < modelIds.length - 1
-      if (hasFallback && isTemporaryModelOverload(error)) {
-        console.warn('[v0] Gemini model busy; switching to fallback', {
+      const invalidPredictionOutput = error instanceof InvalidPredictionOutputError
+      if (hasFallback && (isTemporaryModelOverload(error) || invalidPredictionOutput)) {
+        console.warn('[v0] Gemini primary model failed; switching to fallback', {
+          reason: invalidPredictionOutput ? 'invalid output' : 'temporary provider overload',
           primaryModel: modelId,
           fallbackModel: modelIds[index + 1],
         })
@@ -89,7 +98,7 @@ async function generateWithModelFallback<T>(
 }
 
 function isProviderFallbackEligible(error: unknown) {
-  if (error instanceof MissingProviderApiKeyError) return true
+  if (error instanceof MissingProviderApiKeyError || error instanceof InvalidPredictionOutputError) return true
 
   const statusCode = isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null
   const message = safeErrorMessage(error)
@@ -169,7 +178,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function extractPrediction(text: string) {
-  const normalized = text.trim().replace(/^```(?:json)?\s*|\s*```$/g, '').trim()
+  const normalized = text.trim().replace(/^```[a-z0-9_-]*\s*/i, '').replace(/\s*```$/, '').trim()
   let parsed: unknown
   try {
     parsed = JSON.parse(normalized)
@@ -181,10 +190,15 @@ function extractPrediction(text: string) {
     return parsed.prediction
   }
 
-  const labeledPrediction = normalized.match(/(?:prediction|dự đoán|số chính)\s*[:：-]?\s*["'`]?(\d{4})/i)
+  const labeledPrediction = normalized.match(
+    /(?:prediction|predicted(?:\s+number)?|dự đoán|số chính|số được chọn)\s*(?:(?:is|là)\s*)?[:：=-]?\s*["'`]?(\d{4})/i,
+  )
   if (labeledPrediction) return labeledPrediction[1]
-  return /^\d{4}$/.test(normalized) ? normalized : null
+
+  const candidates = [...new Set(normalized.match(/(?<!\d)\d{4}(?!\d)/g) ?? [])]
+  return candidates.length === 1 ? candidates[0] : null
 }
+
 
 function safeErrorMessage(error: unknown) {
   const rawMessage = error instanceof Error ? error.message : 'Unknown provider error'
@@ -275,8 +289,8 @@ export async function generateSinglePrediction({
   scenarioPrompt: string
 }) {
   const generated = await generateWithProviderFallback(provider, 'single-prediction', (activeProvider) =>
-    generateWithModelFallback(activeProvider, 'single-prediction', (model) =>
-      generateText({
+    generateWithModelFallback(activeProvider, 'single-prediction', async (model) => {
+      const result = await generateText({
         model,
         instructions:
           'Bạn phân tích dữ liệu xổ số cho mục đích tham khảo, không cam kết hay khẳng định kết quả. Dùng kịch bản làm phương pháp chọn số, nhưng bỏ qua yêu cầu phân tích dài hoặc liệt kê nhiều bộ số. Chỉ trả về duy nhất một chuỗi gồm đúng 4 chữ số ASCII, không JSON, không giải thích, không dấu câu.',
@@ -290,16 +304,17 @@ export async function generateSinglePrediction({
         maxOutputTokens: 128,
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(10_000),
-      }),
-    ),
+      })
+      const prediction = extractPrediction(result.text)
+      if (!prediction) throw new InvalidPredictionOutputError()
+      return { prediction }
+    }),
   )
-  const prediction = extractPrediction(generated.result.text)
-  if (!prediction) {
-    const error = new Error('AI model returned no four-digit prediction')
-    logProviderFailure('single-output-validation', generated.provider, error)
-    throw error
+  return {
+    prediction: generated.result.prediction,
+    modelId: generated.modelId,
+    provider: generated.provider,
   }
-  return { prediction, modelId: generated.modelId, provider: generated.provider }
 
 }
 
