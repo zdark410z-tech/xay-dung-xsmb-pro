@@ -8,8 +8,8 @@ export type AiProvider = Extract<ScenarioProvider, 'gemini' | 'deepseek' | 'groq
 
 export const AI_MODELS = {
   gemini: 'gemini-3.8-flash',
-  deepseek: 'deepseek-v4-flash',
-  groq: 'llama-3.3-70b-versatile',
+  deepseek: 'deepseek-flash',
+  groq: 'openai/gpt-oss-20b',
 } as const
 
 const GEMINI_FALLBACK_MODEL = 'gemini-3.5-flash'
@@ -93,8 +93,10 @@ function isProviderFallbackEligible(error: unknown) {
 
   const statusCode = isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null
   const message = safeErrorMessage(error)
-  return statusCode === 429 || (statusCode !== null && statusCode >= 500) ||
-    /quota|resource[_\s-]?exhausted|rate.?limit|daily limit|too many requests|insufficient balance|low balance|balance is not enough|temporarily unavailable|overloaded|high demand/i.test(message)
+  const isRequestTimeout = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+  return statusCode === 401 || statusCode === 402 || statusCode === 403 || statusCode === 404 ||
+    statusCode === 429 || (statusCode !== null && statusCode >= 500) || isRequestTimeout ||
+    /timeout|timed out|aborted|fetch failed|network error|econnreset|eai_again|enotfound|econnrefused|socket hang up|quota|resource[_\s-]?exhausted|rate.?limit|daily limit|too many requests|insufficient balance|low balance|balance is not enough|temporarily unavailable|overloaded|high demand/i.test(message)
 }
 
 function providerFallbackSequence(primary: AiProvider) {

@@ -117,7 +117,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
         groq: 'Groq',
       }
       const providerNote = actualProvider !== scenario.provider
-        ? ` (đã chuyển sang ${providerNames[actualProvider]} do quota hoặc quá tải)`
+        ? ` (đã chuyển sang ${providerNames[actualProvider]} vì nhà cung cấp chính gặp lỗi)`
         : ` (${providerNames[actualProvider]})`
       setOptimisticResults((current) => ({
         ...current,
