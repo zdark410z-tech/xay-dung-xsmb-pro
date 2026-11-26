@@ -38,7 +38,7 @@ function subtractDays(dateKey: string, offset: number) {
   return date.toISOString().slice(0, 10)
 }
 
-function archiveUrl(dateKey: string) {
+export function archiveUrl(dateKey: string) {
   const [year, month, day] = dateKey.split('-')
   return `https://www.minhngoc.net.vn/ket-qua-xo-so/mien-bac/${day}-${month}-${year}.html`
 }
@@ -72,7 +72,7 @@ function parseSource(html: string): ParsedDraw[] {
   return draws.filter((draw, index, list) => list.findIndex((item) => item.date === draw.date) === index)
 }
 
-async function fetchDrawPage(url: string) {
+export async function fetchDrawPage(url: string) {
   const response = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; XSMB research sync)' },
     cache: 'no-store',
