@@ -40,7 +40,7 @@ export const DEFAULT_ANALYSIS_SCENARIOS: DefaultAnalysisScenario[] = [
     provider: 'gemini',
     modelId: 'gemini-3.8-flash',
     sortOrder: 8,
-    prompt: 'Dùng prizes của 10 kỳ trong analysisContext.draws. Tách 2 số cuối Giải 7, 3 số cuối Giải 6, 4 số cuối Giải 5/4/3/2/1 và GĐB; đếm tần suất chữ số/đuôi và mẫu số trên toàn bộ giải. So sánh các số có tần suất cao ở toàn bộ giải với đuôi GĐB riêng. Kiểm tra đuôi ở giải phụ có xuất hiện trong GĐB ở kỳ sau hay không, ghi số lần/tổng cơ hội. Đề xuất 3 bộ số, tỷ lệ thực nghiệm theo từng vị trí và mức tin cậy heuristic; nêu rõ phần dữ liệu thiếu, không suy diễn xác suất chắc chắn.',
+    prompt: 'Dựa trên 10 đuôi giải đặc biệt gần nhất được cung cấp, phân tích chữ số theo từng vị trí và các cặp đuôi lặp. Nêu mẫu số thực tế, chọn một bộ 4 chữ số theo tần suất quan sát được và không suy diễn từ dữ liệu giải phụ không được cung cấp hoặc khẳng định xác suất chắc chắn.',
   },
   {
     id: 'analysis-weighted-methods',
@@ -48,7 +48,7 @@ export const DEFAULT_ANALYSIS_SCENARIOS: DefaultAnalysisScenario[] = [
     provider: 'gemini',
     modelId: 'gemini-3.8-flash',
     sortOrder: 9,
-    prompt: 'Dựa trên analysisContext.methodPerformance và currentMethodPredictions, đối chiếu CT1/CT2/CT3/Gemini/DeepSeek trên 10 ngày có kết quả. Ghi số chữ số khớp/tổng chữ số dự đoán và %, không tự điền số liệu bị thiếu. Gán trọng số accuracy/maxAccuracy; nếu thiếu mẫu, loại phương pháp đó khỏi đồng thuận. Với dự đoán hiện tại đã lưu, tính phiếu có trọng số theo từng vị trí, đưa 3 bộ số xếp hạng và tổng điểm heuristic. Nếu chưa có dự đoán hiện tại của một phương pháp, ghi chưa có thay vì bịa.',
+    prompt: 'Dựa trên 10 đuôi giải đặc biệt gần nhất được cung cấp, so sánh tần suất các chữ số theo từng vị trí và xu hướng lặp. Nêu rõ số liệu mẫu ngắn, chọn một bộ 4 chữ số theo phương pháp tổng hợp và không coi tần suất là xác suất trúng thật. Không suy diễn hiệu suất lịch sử của phương pháp khác.',
   },
   {
     id: 'analysis-four-layer-optimization',
@@ -56,6 +56,6 @@ export const DEFAULT_ANALYSIS_SCENARIOS: DefaultAnalysisScenario[] = [
     provider: 'gemini',
     modelId: 'gemini-3.8-flash',
     sortOrder: 10,
-    prompt: 'Tổng hợp bốn lớp từ dữ liệu analysisContext: (1) tần suất toàn bộ giải; (2) tần suất đuôi GĐB; (3) đồng thuận có trọng số theo hiệu quả thật của 5 phương pháp; (4) xu hướng và chu kỳ. Với từng vị trí, chọn chữ số chính và số phụ, ghi % heuristic cùng số liệu/lý do. Xuất một bộ chính và hai bộ dự phòng, điểm kết hợp, độ bất đồng giữa phương pháp và cảnh báo rủi ro. Không dùng placeholder, không bịa hiệu suất, không trình bày điểm heuristic như xác suất thật hay cam kết trúng.',
+    prompt: 'Tổng hợp tần suất đuôi giải đặc biệt và xu hướng theo từng vị trí từ 10 kỳ gần nhất được cung cấp. Nêu số liệu và giới hạn của mẫu ngắn, chọn một bộ 4 chữ số theo heuristic minh bạch. Không suy diễn hiệu suất lịch sử, không trình bày điểm heuristic như xác suất thật hay cam kết trúng.',
   },
 ]

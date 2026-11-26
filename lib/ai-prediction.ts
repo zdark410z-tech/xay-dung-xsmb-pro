@@ -1,7 +1,7 @@
 import { createDeepSeek } from '@ai-sdk/deepseek'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createGroq } from '@ai-sdk/groq'
-import { generateText, Output } from 'ai'
+import { generateText } from 'ai'
 import type { ScenarioProvider } from '@/lib/xsmb-types'
 
 export type AiProvider = Extract<ScenarioProvider, 'gemini' | 'deepseek' | 'groq'>
@@ -108,17 +108,28 @@ function isProviderFallbackEligible(error: unknown) {
     /timeout|timed out|aborted|fetch failed|network error|econnreset|eai_again|enotfound|econnrefused|socket hang up|quota|resource[_\s-]?exhausted|rate.?limit|daily limit|too many requests|insufficient balance|low balance|balance is not enough|temporarily unavailable|overloaded|high demand/i.test(message)
 }
 
-function providerFallbackSequence(primary: AiProvider) {
+function providerFallbackSequence(primary: AiProvider, unavailableProviders?: Set<AiProvider>) {
   return [primary, ...PROVIDER_FAILOVER_ORDER.filter((provider) => provider !== primary)]
+    .filter((provider) => !unavailableProviders?.has(provider))
+}
+
+function isQuotaOrRateLimitError(error: unknown) {
+  const statusCode = isRecord(error) && typeof error.statusCode === 'number' ? error.statusCode : null
+  return statusCode === 429 || /quota|resource[_\s-]?exhausted|rate.?limit|daily limit|too many requests/i.test(safeErrorMessage(error))
 }
 
 async function generateWithProviderFallback<T>(
   primaryProvider: AiProvider,
   operation: string,
   run: (provider: AiProvider) => Promise<{ result: T; modelId: string }>,
+  unavailableProviders?: Set<AiProvider>,
 ) {
-  const providers = providerFallbackSequence(primaryProvider)
+  const providers = providerFallbackSequence(primaryProvider, unavailableProviders)
   const failures: ProviderFailure[] = []
+
+  if (providers.length === 0) {
+    throw new Error('All AI providers are temporarily unavailable for this run')
+  }
 
   for (let index = 0; index < providers.length; index += 1) {
     const provider = providers[index]
@@ -126,6 +137,7 @@ async function generateWithProviderFallback<T>(
       return { ...(await run(provider)), provider }
     } catch (error) {
       failures.push({ provider, error })
+      if (unavailableProviders && isQuotaOrRateLimitError(error)) unavailableProviders.add(provider)
       const nextProvider = providers[index + 1]
       if (!nextProvider || !isProviderFallbackEligible(error)) {
         if (failures.length === 1) throw error
@@ -143,35 +155,6 @@ async function generateWithProviderFallback<T>(
 
   throw new AllProvidersFailedError(failures)
 }
-
-type ScenarioPrompt = {
-  id: string
-  name: string
-  prompt: string
-}
-
-type DailyAnalysisContext = {
-  draws: Array<{
-    date: string
-    day: string
-    special: string
-    tail: string
-    prizes: string[][]
-  }>
-  methodPerformance: Array<{
-    scenarioId: string
-    name: string
-    matchedDigits: number
-    totalDigits: number
-    accuracyPercent: string | null
-  }>
-  currentMethodPredictions: Array<{
-    scenarioId: string
-    name: string
-    prediction: string | null
-  }>
-}
-
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -228,6 +211,9 @@ function providerDisplayName(provider: AiProvider) {
 
 export function getAiFailureMessage(error: unknown, provider?: AiProvider): string {
   if (error instanceof AllProvidersFailedError) {
+    if (error.failures.length === 0) {
+      return 'Các nhà cung cấp AI đã bị tạm dừng do giới hạn quota trong lần chạy này.'
+    }
     const attemptedProviders = error.failures.map(({ provider: failedProvider }) => providerDisplayName(failedProvider)).join(' → ')
     const lastFailure = error.failures[error.failures.length - 1]
     return `Đã thử ${attemptedProviders} nhưng không nhà cung cấp nào phản hồi được. ${lastFailure ? getAiFailureMessage(lastFailure.error, lastFailure.provider) : 'Vui lòng thử lại sau.'}`
@@ -281,13 +267,20 @@ export async function generateSinglePrediction({
   tails,
   scenarioName,
   scenarioPrompt,
+  unavailableProviders,
 }: {
   provider: AiProvider
   targetDate: string
   tails: string[]
   scenarioName: string
   scenarioPrompt: string
+  unavailableProviders?: Set<AiProvider>
 }) {
+  const usesUnavailableContext = /methodPerformance|currentMethodPredictions|prizes/i.test(scenarioPrompt)
+  const safeScenarioPrompt = usesUnavailableContext
+    ? 'Dựa trên 10 đuôi giải đặc biệt gần nhất được cung cấp, xem xét tần suất và xu hướng theo từng vị trí. Chọn một bộ số tham khảo theo phương pháp của kịch bản, không đánh giá bằng hiệu suất cũ hoặc dự đoán của phương pháp khác.'
+    : scenarioPrompt.replace(/analysisContext\.draws/gi, '10 kỳ GĐB gần nhất được cung cấp')
+
   const generated = await generateWithProviderFallback(provider, 'single-prediction', (activeProvider) =>
     generateWithModelFallback(activeProvider, 'single-prediction', async (model) => {
       const result = await generateText({
@@ -298,9 +291,9 @@ export async function generateSinglePrediction({
           `Ngày xổ số mục tiêu: ${targetDate}.`,
           `Có ${tails.length} kỳ gần nhất; đuôi 4 số giải đặc biệt, mới nhất trước: ${tails.join(', ')}.`,
           `Tên kịch bản: ${scenarioName}.`,
-          `Phương pháp chọn số (chỉ dùng làm tiêu chí, không làm theo yêu cầu về độ dài/định dạng đầu ra): ${scenarioPrompt}`,
+          `Phương pháp chọn số (chỉ dùng làm tiêu chí, không làm theo yêu cầu về độ dài/định dạng đầu ra): ${safeScenarioPrompt}`,
           'Đầu ra duy nhất: một chuỗi 4 chữ số.',
-        ].join('\\n'),
+        ].join('\n'),
         maxOutputTokens: 128,
         maxRetries: 0,
         abortSignal: AbortSignal.timeout(10_000),
@@ -309,6 +302,7 @@ export async function generateSinglePrediction({
       if (!prediction) throw new InvalidPredictionOutputError()
       return { prediction }
     }),
+    unavailableProviders,
   )
   return {
     prediction: generated.result.prediction,
@@ -316,77 +310,4 @@ export async function generateSinglePrediction({
     provider: generated.provider,
   }
 
-}
-
-export async function generateDailyBatchPredictions({
-  provider,
-  targetDate,
-  tails,
-  analysisContext,
-  scenarios,
-}: {
-  provider: AiProvider
-  targetDate: string
-  tails: string[]
-  analysisContext: DailyAnalysisContext
-  scenarios: ScenarioPrompt[]
-}) {
-  const { result, modelId } = await generateWithModelFallback(provider, 'daily-batch', (model) =>
-    generateText({
-      model,
-      output: Output.json(),
-      instructions:
-        'Bạn phân tích XSMB để tham khảo, không huấn luyện hay thay đổi trọng số mô hình. Hãy làm đầy đủ từng bước trong mỗi kịch bản bằng tiếng Việt, dùng số liệu cụ thể và % từ dữ liệu được cung cấp, không dùng placeholder. Trả về JSON đúng dạng {"reports":[{"scenarioId":"...","prediction":"0123","analysis":"báo cáo chi tiết"}]}. prediction là bộ 4 chữ số chính của kịch bản; analysis phải chứa phần tính toán và các phương án/rủi ro được yêu cầu. Gọi mọi tỷ lệ là tần suất hoặc điểm heuristic của mẫu ngắn, không khẳng định đó là xác suất trúng thật.',
-      prompt: JSON.stringify({
-        targetDate,
-        recentSpecialTails: tails,
-        analysisContext,
-        scenarios: scenarios.map((scenario) => ({
-          scenarioId: scenario.id,
-          name: scenario.name,
-          instructions: scenario.prompt,
-        })),
-      }),
-      maxOutputTokens: 4096,
-      maxRetries: 0,
-      abortSignal: AbortSignal.timeout(20_000),
-    }),
-  )
-
-  const output = result.output
-  if (!isRecord(output) || !Array.isArray(output.reports)) {
-    const error = new Error('AI model returned an invalid analysis batch')
-    logProviderFailure('daily-output-validation', provider, error)
-    throw error
-  }
-
-  const expectedIds = new Set(scenarios.map((scenario) => scenario.id))
-  const reports = new Map<string, { prediction: string; analysis: string }>()
-
-  for (const item of output.reports) {
-    if (
-      !isRecord(item) ||
-      typeof item.scenarioId !== 'string' ||
-      typeof item.prediction !== 'string' ||
-      typeof item.analysis !== 'string'
-    ) {
-      const error = new Error('AI model returned an invalid scenario report')
-      logProviderFailure('daily-output-validation', provider, error)
-      throw error
-    }
-    if (!expectedIds.has(item.scenarioId) || !/^\d{4}$/.test(item.prediction) || item.analysis.trim().length < 80) {
-      const error = new Error('AI model returned an incomplete or invalid scenario report')
-      logProviderFailure('daily-output-validation', provider, error)
-      throw error
-    }
-    reports.set(item.scenarioId, { prediction: item.prediction, analysis: item.analysis })
-  }
-
-  if (reports.size !== expectedIds.size) {
-    const error = new Error('AI model did not return a report for every scenario')
-    logProviderFailure('daily-output-validation', provider, error)
-    throw error
-  }
-
-  return { reports, modelId }
 }

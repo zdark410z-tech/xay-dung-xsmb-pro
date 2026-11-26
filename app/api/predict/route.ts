@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, lt } from 'drizzle-orm'
 import { generateSinglePrediction, getAiFailureMessage, type AiProvider } from '@/lib/ai-prediction'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
@@ -22,6 +22,28 @@ function isDateKey(value: unknown): value is string {
   return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value
 }
 
+function getVietnamDateTime() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return {
+    date: `${values.year}-${values.month}-${values.day}`,
+    hour: Number(values.hour),
+  }
+}
+
+function invalidTargetDateMessage(targetDate: string, today: string) {
+  return targetDate < today
+    ? 'Không thể dự đoán cho ngày đã qua. Chỉ chấp nhận ngày hôm nay theo giờ Việt Nam.'
+    : 'Không thể dự đoán cho ngày tương lai. Chỉ chấp nhận ngày hôm nay theo giờ Việt Nam.'
+}
+
 export async function POST(request: NextRequest) {
   if (!isSameOriginRequest(request)) {
     return NextResponse.json({ error: 'Yêu cầu không hợp lệ.' }, { status: 403 })
@@ -39,6 +61,10 @@ export async function POST(request: NextRequest) {
   }
 
   const { scenarioId, targetDate } = body
+  const requestDateTime = getVietnamDateTime()
+  if (targetDate !== requestDateTime.date) {
+    return NextResponse.json({ error: invalidTargetDateMessage(targetDate, requestDateTime.date) }, { status: 400 })
+  }
 
   try {
     const [scenario] = await db
@@ -79,10 +105,20 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    const latestDateTime = getVietnamDateTime()
+    if (targetDate !== latestDateTime.date) {
+      return NextResponse.json({ error: invalidTargetDateMessage(targetDate, latestDateTime.date) }, { status: 400 })
+    }
+    if (latestDateTime.hour >= 18) {
+      return NextResponse.json({
+        error: 'Đã qua 18:00 giờ Việt Nam. Chỉ có thể xem dự đoán đã lưu; không thể tạo dự đoán mới.',
+      }, { status: 409 })
+    }
+
     const recentDraws = await db
       .select({ tail: xsmbDraws.tail })
       .from(xsmbDraws)
-      .where(eq(xsmbDraws.userId, USER_SCOPE))
+      .where(and(eq(xsmbDraws.userId, USER_SCOPE), lt(xsmbDraws.drawDate, targetDate)))
       .orderBy(desc(xsmbDraws.drawDate))
       .limit(10)
     const tails = recentDraws.map((draw) => draw.tail).filter((tail) => /^\d{4}$/.test(tail))

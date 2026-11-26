@@ -17,15 +17,47 @@ function formatDate(date: string) {
   return year && month && day ? `${day}/${month}/${year}` : date
 }
 
-function accuracy(scenarioId: string, draws: XsmbDraw[]) {
+function getVietnamDateKey() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function dateDaysAgo(date: string, days: number) {
+  const cutoff = new Date(`${date}T00:00:00.000Z`)
+  cutoff.setUTCDate(cutoff.getUTCDate() - days)
+  return cutoff.toISOString().slice(0, 10)
+}
+
+function accuracy(scenarioId: string, draws: XsmbDraw[], days: number, today: string) {
+  const cutoff = dateDaysAgo(today, days)
   const comparable = draws.filter(
-    (draw) => /^\d{4}$/.test(draw.tail) && /^\d{4}$/.test(draw.predictions[scenarioId] ?? ''),
+    (draw) => draw.date >= cutoff && /^\d{4}$/.test(draw.tail) && /^\d{4}$/.test(draw.predictions[scenarioId] ?? ''),
   )
-  const hit = comparable.reduce((total, draw) => {
-    return total + [...draw.predictions[scenarioId]].filter((digit, index) => digit === draw.tail[index]).length
-  }, 0)
-  const total = comparable.length * 4
-  return { hit, total, percent: total ? ((hit / total) * 100).toFixed(1) : '—' }
+  const positionHits = [0, 0, 0, 0]
+  for (const draw of comparable) {
+    const prediction = draw.predictions[scenarioId]
+    for (let position = 0; position < 4; position += 1) {
+      if (prediction[position] === draw.tail[position]) positionHits[position] += 1
+    }
+  }
+  const hit = positionHits.reduce((sum, count) => sum + count, 0)
+  const sampleCount = comparable.length
+  const total = sampleCount * 4
+  const formatPercent = (value: number) => value.toFixed(1).replace('.', ',')
+  return {
+    hit,
+    total,
+    sampleCount,
+    percent: total ? formatPercent((hit / total) * 100) : '—',
+    positionHits,
+    positionPercents: positionHits.map((count) => sampleCount ? formatPercent((count / sampleCount) * 100) : '—'),
+  }
 }
 
 function providerLabel(scenario: Scenario) {
@@ -60,6 +92,7 @@ export function HistoryPanel({
   onSync,
 }: Props) {
   const actualDraws = draws.filter((draw) => /^\d{4}$/.test(draw.tail))
+  const today = getVietnamDateKey()
   const status = loadError
     ? loadError
     : syncError
@@ -89,7 +122,6 @@ export function HistoryPanel({
       {scenarios.length > 0 && (
         <div className="summary-grid" aria-label="Hiệu suất theo kịch bản">
           {scenarios.map((scenario) => {
-            const stat = accuracy(scenario.id, draws)
             const color = scenario.provider === 'formula'
               ? scenario.id === 'c2' ? 'green' : scenario.id === 'c3' ? 'blue' : 'red'
               : scenario.provider === 'groq' ? 'green' : scenario.provider === 'deepseek' ? 'cyan' : 'purple'
@@ -100,17 +132,27 @@ export function HistoryPanel({
                   <span>{scenario.name}</span>
                   <BarChart3 aria-hidden="true" size={16} />
                 </div>
-                <strong>{stat.percent}<small>{stat.percent === '—' ? '' : '%'}</small></strong>
-                <p>{stat.hit} / {stat.total} chữ số khớp</p>
-                <div
-                  className="progress"
-                  role="progressbar"
-                  aria-label={`Tỷ lệ khớp ${stat.percent}${stat.percent === '—' ? '' : '%'}`}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={stat.total ? Number(stat.percent) : 0}
-                >
-                  <i style={{ width: `${stat.total ? stat.percent : 0}%` }} />
+                <div className="accuracy-window-list">
+                  {[30, 90].map((days) => {
+                    const stat = accuracy(scenario.id, draws, days, today)
+                    return (
+                      <section className="accuracy-window" key={`${scenario.id}-${days}`} aria-label={`${days} ngày gần nhất`}>
+                        <div className="accuracy-window-heading">
+                          <b>{days} ngày</b>
+                          <strong>{stat.percent}{stat.total ? '%' : ''}</strong>
+                        </div>
+                        <p>
+                          Trúng {stat.hit}/{stat.total} chữ số = {stat.percent}{stat.total ? '%' : ''} · ngẫu nhiên kỳ vọng 10%/chữ số · n = {stat.sampleCount} kỳ
+                        </p>
+                        <small className="accuracy-breakdown">
+                          {stat.positionHits.map((hits, index) => `Vị trí ${index + 1}: ${hits}/${stat.sampleCount}${stat.sampleCount ? ` (${stat.positionPercents[index]}%)` : ''}`).join(' · ')}
+                        </small>
+                        {stat.sampleCount < 30 && (
+                          <small className="accuracy-small-sample">mẫu quá nhỏ, chưa kết luận được</small>
+                        )}
+                      </section>
+                    )
+                  })}
                 </div>
               </article>
             )
@@ -126,7 +168,7 @@ export function HistoryPanel({
       {loading && draws.length === 0 && <p className="empty-state" role="status">Đang tải lịch sử…</p>}
       {!loading && draws.length === 0 && (
         <p className="empty-state" role="status">
-          {loadError ?? 'Chưa có dữ liệu. Hãy đồng bộ kết quả hoặc tạo dự đoán cho ngày sắp tới.'}
+          {loadError ?? 'Chưa có dữ liệu. Hãy đồng bộ kết quả hoặc tạo dự đoán cho ngày hôm nay.'}
         </p>
       )}
 
