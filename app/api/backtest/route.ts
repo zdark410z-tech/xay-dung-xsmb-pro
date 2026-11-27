@@ -1,11 +1,11 @@
 import { asc, eq } from 'drizzle-orm'
 import { NextResponse } from 'next/server'
-import { calculateBacktest } from '@/lib/xsmb-backtest'
+import { BACKTEST_FREEZE_DATE, calculateBacktest } from '@/lib/xsmb-backtest'
 import { db } from '@/lib/db'
 import { xsmbDraws } from '@/lib/db/schema'
 import { XSMB_USER_SCOPE } from '@/lib/xsmb-source'
 
-export const FREEZE_DATE = '2026-11-27'
+export const FREEZE_DATE = BACKTEST_FREEZE_DATE
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 

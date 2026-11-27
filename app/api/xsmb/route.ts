@@ -3,15 +3,27 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { xsmbAiReports, xsmbDraws, xsmbPredictions } from '@/lib/db/schema'
 import { syncRecentDraws, XSMB_USER_SCOPE } from '@/lib/xsmb-source'
-import type { PredictionMeta, XsmbAiReport, XsmbDraw } from '@/lib/xsmb-types'
+import type { PredictionMeta, XsmbAiCommentary, XsmbAiReport, XsmbDraw } from '@/lib/xsmb-types'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 45
 
+function getVietnamDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
+}
+
 export async function GET() {
   let syncError: string | null = null
   let refreshedAt: string | null = null
+  const targetDate = getVietnamDate()
 
   try {
     try {
@@ -42,6 +54,9 @@ export async function GET() {
         .orderBy(desc(xsmbAiReports.targetDate), desc(xsmbAiReports.createdAt))
         .limit(3000),
     ])
+
+    const targetPredictionCount = storedPredictions.filter((prediction) => prediction.targetDate === targetDate).length
+    console.log('[xsmb] saved predictions for target date', { targetDate, count: targetPredictionCount })
 
     const byDate = new Map<string, XsmbDraw>()
     for (const draw of storedDraws) {
@@ -83,7 +98,17 @@ export async function GET() {
       }
     }
 
+    let aiCommentary: XsmbAiCommentary | null = null
     for (const report of storedReports) {
+      if (report.scenarioId === 'AI_COMMENTARY' && report.targetDate === targetDate) {
+        aiCommentary = {
+          targetDate: report.targetDate,
+          analysis: report.analysis,
+          provider: report.provider,
+          modelId: report.modelId,
+        }
+        continue
+      }
       if (report.provider === 'formula') continue
       const draw = getOrCreateDraw(report.targetDate)
       const reportData: XsmbAiReport = {
@@ -104,8 +129,8 @@ export async function GET() {
     const draws = [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 180)
     const syncedAt = refreshedAt ?? storedDraws[0]?.syncedAt?.toISOString() ?? null
 
-    return NextResponse.json({ draws, count: draws.length, syncedAt, syncError })
+    return NextResponse.json({ draws, count: draws.length, syncedAt, syncError, aiCommentary }, { headers: { 'Cache-Control': 'no-store' } })
   } catch {
-    return NextResponse.json({ error: 'Không thể tải dữ liệu lịch sử từ cơ sở dữ liệu.' }, { status: 503 })
+    return NextResponse.json({ error: 'Không thể tải dữ liệu lịch sử từ cơ sở dữ liệu.' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
   }
 }

@@ -12,10 +12,11 @@ import type { Scenario, ScenarioProvider, XsmbHistoryResponse } from '@/lib/xsmb
 type Props = {
   todayDate: string
   initialTargetDate: string
+  aiPredictionsEnabled: boolean
 }
 
 type ScenarioResponse = { scenarios: Scenario[] }
-type PredictionResponse = { prediction: string; provider?: ScenarioProvider; saved?: boolean; alreadySaved?: boolean }
+type PredictionResponse = { prediction: string; provider?: ScenarioProvider; persisted?: boolean; saved?: boolean; alreadySaved?: boolean }
 type Tab = 'history' | 'predict' | 'config'
 
 async function fetcher<T>(url: string): Promise<T> {
@@ -30,7 +31,7 @@ function formatVietnamDate(date: string) {
   return year && month && day ? `${day}.${month}.${year}` : date
 }
 
-export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
+export default function XsmbApp({ todayDate, initialTargetDate, aiPredictionsEnabled }: Props) {
   const [tab, setTab] = useState<Tab>('history')
   const [targetDate, setTargetDate] = useState(initialTargetDate)
   const [syncing, setSyncing] = useState(false)
@@ -59,6 +60,11 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
 
   const draws = historyData?.draws ?? []
   const activeScenarios = scenarioData?.scenarios ?? []
+  const predictionScenarios = useMemo(() => {
+    if (aiPredictionsEnabled) return activeScenarios
+    const visibleFormulaIds = new Set(['c1', 'c2', 'c3', 'kb7', 'kb8', 'kb9', 'kb10', 'kb11', 'kb12', 'kb13'])
+    return activeScenarios.filter((scenario) => scenario.provider === 'formula' && visibleFormulaIds.has(scenario.id))
+  }, [activeScenarios, aiPredictionsEnabled])
   const historyScenarios = useMemo(() => {
     const sources = new Map<string, Scenario>()
     activeScenarios.forEach((scenario) => sources.set(scenario.id, scenario))
@@ -115,7 +121,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
       if (!response.ok) throw new Error(payload.error ?? 'Không thể tạo dự đoán.')
 
       const result = payload as PredictionResponse
-      if (result.saved !== true) throw new Error(`${scenario.name}: máy chủ chưa xác nhận lưu dự đoán.`)
+      if (result.persisted !== true) throw new Error(`${scenario.name}: máy chủ chưa xác nhận dữ liệu đã lưu trong cơ sở dữ liệu.`)
       const actualProvider = result.provider ?? scenario.provider
       const providerNames: Record<ScenarioProvider, string> = {
         formula: 'công thức nội bộ',
@@ -196,6 +202,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
           syncError={syncError}
           loadError={historyLoadError}
           backtest={backtestData}
+          aiCommentary={historyData?.aiCommentary}
           backtestLoading={backtestLoading}
           backtestError={backtestError instanceof Error ? backtestError.message : undefined}
           onSync={syncHistory}
@@ -203,7 +210,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
       )}
       {tab === 'predict' && (
         <PredictionPanel
-          scenarios={activeScenarios}
+          scenarios={predictionScenarios}
           draws={draws}
           targetDate={targetDate}
           todayDate={todayDate}

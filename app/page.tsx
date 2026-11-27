@@ -1,4 +1,5 @@
 import XsmbApp from '@/components/xsmb-app'
+import { AI_PREDICTIONS_ENABLED } from '@/lib/ai-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,5 +18,5 @@ function getVietnamDate(offsetDays = 0) {
 }
 
 export default function Page() {
-  return <XsmbApp todayDate={getVietnamDate()} initialTargetDate={getVietnamDate()} />
+  return <XsmbApp todayDate={getVietnamDate()} initialTargetDate={getVietnamDate()} aiPredictionsEnabled={AI_PREDICTIONS_ENABLED} />
 }

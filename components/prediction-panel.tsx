@@ -5,6 +5,8 @@ import { Brain, Calculator, Sparkles, Target } from 'lucide-react'
 import { positionRulePrediction } from '@/lib/xsmb-position-rules'
 import type { Scenario, ScenarioProvider, XsmbDraw } from '@/lib/xsmb-types'
 
+const FINAL_SUMMARY_SCENARIOS = new Set(['c1', 'c2', 'c3', 'kb7', 'kb8', 'kb9', 'kb10'])
+
 type Props = {
   scenarios: Scenario[]
   draws: XsmbDraw[]
@@ -52,7 +54,9 @@ export function PredictionPanel({
 }: Props) {
   const [showFinal, setShowFinal] = useState(false)
   const recentCount = draws.filter((draw) => /^\d{4}$/.test(draw.tail)).length
-  const values = Object.values(results).filter((value) => /^\d{4}$/.test(value))
+  const values = Object.entries(results)
+    .filter(([scenarioId, value]) => FINAL_SUMMARY_SCENARIOS.has(scenarioId) && /^\d{4}$/.test(value))
+    .map(([, value]) => value)
   const formulaDetails = new Map(scenarios
     .filter((scenario) => /^kb(?:[7-9]|1[0-3])$/.test(scenario.id))
     .map((scenario) => [scenario.id, positionRulePrediction(scenario.id, targetDate, draws.filter((draw) => draw.date < targetDate))]))

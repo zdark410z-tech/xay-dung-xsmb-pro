@@ -2,6 +2,7 @@ import { and, desc, eq, lt } from 'drizzle-orm'
 import { generateSinglePrediction, getAiFailureMessage, getProviderFailureSummaries, type AiProvider } from '@/lib/ai-prediction'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { AI_PREDICTIONS_ENABLED } from '@/lib/ai-config'
 import { formulaPrediction } from '@/lib/xsmb-formulas'
 import { positionRulePrediction } from '@/lib/xsmb-position-rules'
 import { xsmbDraws, xsmbPredictions, xsmbScenarios } from '@/lib/db/schema'
@@ -45,6 +46,23 @@ function invalidTargetDateMessage(targetDate: string, today: string) {
     : 'Không thể dự đoán cho ngày tương lai. Chỉ chấp nhận ngày hôm nay theo giờ Việt Nam.'
 }
 
+function safePersistenceError(error: unknown) {
+  const details = error && typeof error === 'object' ? error as Record<string, unknown> : {}
+  const name = error instanceof Error ? error.name : 'UnknownError'
+  let message = error instanceof Error ? error.message : String(error)
+  const secrets = Object.entries(process.env)
+    .filter(([key, value]) => value && /DATABASE_URL|API_KEY|SECRET|TOKEN/i.test(key))
+    .map(([, value]) => value as string)
+    .filter((value) => value.length >= 8)
+  for (const secret of secrets) message = message.replaceAll(secret, '[redacted]')
+  message = message
+    .replace(/postgres(?:ql)?:\/\/[^\s"'`]+/gi, '[database connection redacted]')
+    .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [redacted]')
+    .replace(/((?:api[_ -]?key|access[_ -]?token|authorization|password|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[redacted]')
+    .slice(0, 180)
+  return { name, message, code: typeof details.code === 'string' || typeof details.code === 'number' ? details.code : null }
+}
+
 export async function POST(request: NextRequest) {
   if (!isSameOriginRequest(request)) {
     return NextResponse.json({ error: 'Yêu cầu không hợp lệ.' }, { status: 403 })
@@ -83,6 +101,9 @@ export async function POST(request: NextRequest) {
     if (!scenario) {
       return NextResponse.json({ error: 'Không tìm thấy kịch bản đang hoạt động.' }, { status: 404 })
     }
+    if (!AI_PREDICTIONS_ENABLED && scenario.provider !== 'formula') {
+      return NextResponse.json({ error: 'Dự đoán bằng AI đang tắt' }, { status: 403 })
+    }
 
     const [existing] = await db
       .select({ prediction: xsmbPredictions.prediction, provider: xsmbPredictions.provider })
@@ -103,6 +124,7 @@ export async function POST(request: NextRequest) {
         scenarioId: scenario.id,
         targetDate,
         saved: true,
+        persisted: true,
         alreadySaved: true,
       })
     }
@@ -178,6 +200,65 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (activeProvider === 'formula') {
+      let inserted = false
+      try {
+        const [newRow] = await db
+          .insert(xsmbPredictions)
+          .values({
+            userId: USER_SCOPE,
+            targetDate,
+            scenarioId: scenario.id,
+            scenarioName: scenario.name,
+            provider: 'formula',
+            modelId: null,
+            promptSnapshot: scenario.prompt,
+            prediction,
+          })
+          .onConflictDoNothing({
+            target: [xsmbPredictions.userId, xsmbPredictions.targetDate, xsmbPredictions.scenarioId],
+          })
+          .returning({ scenarioId: xsmbPredictions.scenarioId })
+        inserted = Boolean(newRow)
+
+        const [persisted] = await db
+          .select({ prediction: xsmbPredictions.prediction, provider: xsmbPredictions.provider })
+          .from(xsmbPredictions)
+          .where(and(
+            eq(xsmbPredictions.userId, USER_SCOPE),
+            eq(xsmbPredictions.targetDate, targetDate),
+            eq(xsmbPredictions.scenarioId, scenario.id),
+          ))
+          .limit(1)
+
+        if (!persisted) throw new Error('Không tìm thấy dòng dự đoán sau khi lưu')
+        return NextResponse.json({
+          prediction: persisted.prediction,
+          provider: persisted.provider,
+          scenarioId: scenario.id,
+          targetDate,
+          saved: true,
+          persisted: true,
+          ...(!inserted ? { alreadySaved: true } : {}),
+        }, { headers: { 'Cache-Control': 'no-store' } })
+      } catch (error) {
+        const details = safePersistenceError(error)
+        console.error('[predict] formula persistence failed', {
+          scenarioId: scenario.id,
+          targetDate,
+          name: details.name,
+          message: details.message,
+          code: details.code,
+        })
+        return NextResponse.json({
+          error: `Không lưu được dự đoán (${details.name}: ${details.message})`,
+          scenarioId: scenario.id,
+          targetDate,
+          persisted: false,
+        }, { status: 500, headers: { 'Cache-Control': 'no-store' } })
+      }
+    }
+
     const [inserted] = await db
       .insert(xsmbPredictions)
       .values({
@@ -196,7 +277,7 @@ export async function POST(request: NextRequest) {
       .returning({ prediction: xsmbPredictions.prediction, provider: xsmbPredictions.provider })
 
     if (inserted) {
-      return NextResponse.json({ prediction: inserted.prediction, provider: inserted.provider, scenarioId: scenario.id, targetDate, saved: true })
+      return NextResponse.json({ prediction: inserted.prediction, provider: inserted.provider, scenarioId: scenario.id, targetDate, saved: true, persisted: true }, { headers: { 'Cache-Control': 'no-store' } })
     }
 
     const [saved] = await db
@@ -212,7 +293,7 @@ export async function POST(request: NextRequest) {
       .limit(1)
 
     if (!saved) {
-      return NextResponse.json({ error: 'Không thể xác nhận dự đoán đã lưu trong lịch sử.' }, { status: 503 })
+      return NextResponse.json({ error: 'Không thể xác nhận dự đoán đã lưu trong lịch sử.', persisted: false }, { status: 500, headers: { 'Cache-Control': 'no-store' } })
     }
 
     return NextResponse.json({
@@ -221,8 +302,9 @@ export async function POST(request: NextRequest) {
       scenarioId: scenario.id,
       targetDate,
       saved: true,
+      persisted: true,
       alreadySaved: true,
-    })
+    }, { headers: { 'Cache-Control': 'no-store' } })
   } catch {
     return NextResponse.json({ error: 'Không thể lưu dự đoán vào lịch sử.' }, { status: 503 })
   }
