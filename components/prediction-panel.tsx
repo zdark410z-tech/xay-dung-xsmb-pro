@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Brain, Calculator, Sparkles, Target } from 'lucide-react'
+import { positionRulePrediction } from '@/lib/xsmb-position-rules'
 import type { Scenario, ScenarioProvider, XsmbDraw } from '@/lib/xsmb-types'
 
 type Props = {
@@ -52,6 +53,9 @@ export function PredictionPanel({
   const [showFinal, setShowFinal] = useState(false)
   const recentCount = draws.filter((draw) => /^\d{4}$/.test(draw.tail)).length
   const values = Object.values(results).filter((value) => /^\d{4}$/.test(value))
+  const formulaDetails = new Map(scenarios
+    .filter((scenario) => /^kb(?:[7-9]|1[0-3])$/.test(scenario.id))
+    .map((scenario) => [scenario.id, positionRulePrediction(scenario.id, targetDate, draws.filter((draw) => draw.date < targetDate))]))
   const finalPrediction = values.length
     ? Array.from({ length: 4 }, (_, index) => {
         const counts: Record<string, number> = {}
@@ -91,7 +95,7 @@ export function PredictionPanel({
               key={scenario.id}
               className={`action ${colorFor(scenario)}`}
               onClick={() => onRun(scenario)}
-              disabled={Boolean(runningId) || saved || recentCount === 0}
+              disabled={Boolean(runningId) || saved || (recentCount === 0 && scenario.id !== 'kb12')}
               aria-label={`${saved ? 'Đã lưu' : running ? 'Đang phân tích' : 'Chạy'} ${scenario.name} cho ${formatDate(targetDate)}`}
             >
               <Sparkles aria-hidden="true" size={15} />
@@ -133,6 +137,18 @@ export function PredictionPanel({
                   </i>
                 ))}
               </div>
+              {formulaDetails.has(scenario.id) && (
+                <div className="formula-candidates">
+                  {(() => {
+                    const details = formulaDetails.get(scenario.id)
+                    if (!details) return <small>chưa đủ dữ liệu hôm trước</small>
+                    const labels = ['Nghìn', 'Trăm', 'Chục', 'Đơn vị']
+                    return details.candidates.some((digits) => digits.length > 1)
+                      ? <small>{details.candidates.map((digits, index) => digits.length > 1 ? `${labels[index]}: ${digits.join(' / ')}` : null).filter(Boolean).join(' · ')}</small>
+                      : null
+                  })()}
+                </div>
+              )}
             </article>
           )
         })}

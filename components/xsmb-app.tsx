@@ -6,6 +6,7 @@ import { BarChart3, ClipboardList, Settings, WandSparkles } from 'lucide-react'
 import { HistoryPanel } from '@/components/history-panel'
 import { PredictionPanel } from '@/components/prediction-panel'
 import { ScenarioPanel } from '@/components/scenario-panel'
+import type { BacktestResult } from '@/lib/xsmb-backtest'
 import type { Scenario, ScenarioProvider, XsmbHistoryResponse } from '@/lib/xsmb-types'
 
 type Props = {
@@ -50,6 +51,11 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
     isLoading: scenariosLoading,
     mutate: mutateScenarios,
   } = useSWR<ScenarioResponse>('/api/scenarios', fetcher, { revalidateOnFocus: false })
+  const {
+    data: backtestData,
+    error: backtestError,
+    isLoading: backtestLoading,
+  } = useSWR<BacktestResult>(tab === 'history' ? '/api/backtest' : null, fetcher, { revalidateOnFocus: false })
 
   const draws = historyData?.draws ?? []
   const activeScenarios = scenarioData?.scenarios ?? []
@@ -189,6 +195,9 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
           syncedAt={historyData?.syncedAt ?? null}
           syncError={syncError}
           loadError={historyLoadError}
+          backtest={backtestData}
+          backtestLoading={backtestLoading}
+          backtestError={backtestError instanceof Error ? backtestError.message : undefined}
           onSync={syncHistory}
         />
       )}

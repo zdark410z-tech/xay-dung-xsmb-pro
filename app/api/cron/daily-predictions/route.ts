@@ -6,6 +6,7 @@ import { ensureDefaultAnalysisScenarios } from '@/lib/db/seed'
 import { xsmbDraws, xsmbPredictions, xsmbScenarios } from '@/lib/db/schema'
 import { generateSinglePrediction, getAiFailureMessage, type AiProvider } from '@/lib/ai-prediction'
 import { syncRecentDraws, XSMB_USER_SCOPE } from '@/lib/xsmb-source'
+import { positionRulePrediction } from '@/lib/xsmb-position-rules'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -35,9 +36,78 @@ function getVietnamDate() {
 }
 
 type CronResult = {
-  saved: Array<{ scenarioId: string; provider: AiProvider; prediction: string }>
-  skipped: Array<{ scenarioId: string; reason: 'already_exists' }>
+  saved: Array<{ scenarioId: string; provider: AiProvider | 'formula'; prediction: string }>
+  skipped: Array<{ scenarioId: string; reason: 'already_exists' | 'insufficient_history' }>
   failures: Array<{ scenarioId: string; provider: AiProvider | 'system'; message: string }>
+}
+
+async function saveDailyFormulaPredictions(targetDate: string, result: CronResult) {
+  const scenarios = await db
+    .select()
+    .from(xsmbScenarios)
+    .where(and(
+      eq(xsmbScenarios.userId, XSMB_USER_SCOPE),
+      eq(xsmbScenarios.provider, 'formula'),
+      eq(xsmbScenarios.isBuiltin, true),
+      eq(xsmbScenarios.isActive, true),
+    ))
+    .orderBy(xsmbScenarios.sortOrder)
+
+  if (!scenarios.length) return
+
+  const priorDraws = await db
+    .select({ date: xsmbDraws.drawDate, tail: xsmbDraws.tail, prizes: xsmbDraws.prizes })
+    .from(xsmbDraws)
+    .where(and(eq(xsmbDraws.userId, XSMB_USER_SCOPE), lt(xsmbDraws.drawDate, targetDate)))
+    .orderBy(desc(xsmbDraws.drawDate))
+    .limit(2)
+  const scenarioIds = scenarios.map((scenario) => scenario.id)
+  const existing = await db
+    .select({ scenarioId: xsmbPredictions.scenarioId })
+    .from(xsmbPredictions)
+    .where(and(
+      eq(xsmbPredictions.userId, XSMB_USER_SCOPE),
+      eq(xsmbPredictions.targetDate, targetDate),
+      inArray(xsmbPredictions.scenarioId, scenarioIds),
+    ))
+  const existingIds = new Set(existing.map((row) => row.scenarioId))
+
+  for (const scenario of scenarios) {
+    if (existingIds.has(scenario.id)) {
+      result.skipped.push({ scenarioId: scenario.id, reason: 'already_exists' })
+      continue
+    }
+
+    const calculated = positionRulePrediction(scenario.id, targetDate, priorDraws)
+    if (!calculated) {
+      result.skipped.push({ scenarioId: scenario.id, reason: 'insufficient_history' })
+      continue
+    }
+
+    const [inserted] = await db
+      .insert(xsmbPredictions)
+      .values({
+        userId: XSMB_USER_SCOPE,
+        targetDate,
+        scenarioId: scenario.id,
+        scenarioName: scenario.name,
+        provider: 'formula',
+        modelId: null,
+        promptSnapshot: scenario.prompt,
+        prediction: calculated.prediction,
+      })
+      .onConflictDoNothing({
+        target: [xsmbPredictions.userId, xsmbPredictions.targetDate, xsmbPredictions.scenarioId],
+      })
+      .returning({ scenarioId: xsmbPredictions.scenarioId })
+
+    if (inserted) {
+      result.saved.push({ scenarioId: scenario.id, provider: 'formula', prediction: calculated.prediction })
+      existingIds.add(scenario.id)
+    } else {
+      result.skipped.push({ scenarioId: scenario.id, reason: 'already_exists' })
+    }
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -68,6 +138,9 @@ export async function GET(request: NextRequest) {
       .orderBy(xsmbScenarios.sortOrder)
       .limit(REQUIRED_SCENARIOS + 1)
 
+    const sync = await syncRecentDraws()
+    await saveDailyFormulaPredictions(targetDate, result)
+
     if (scenarios.length !== REQUIRED_SCENARIOS) {
       return NextResponse.json({
         status: 'waiting_for_six_scenarios',
@@ -77,8 +150,6 @@ export async function GET(request: NextRequest) {
         ...result,
       })
     }
-
-    const sync = await syncRecentDraws()
     if (sync.count < 10) {
       return NextResponse.json({
         status: 'waiting_for_ten_draws',
