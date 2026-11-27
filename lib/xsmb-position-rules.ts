@@ -12,6 +12,9 @@ export type PositionRuleResult = {
 }
 
 export const FORMULA_SCENARIOS = [
+  { id: 'c1', name: 'Công thức 1 · Tần suất cao', prompt: 'Chọn chữ số có tần suất cao nhất theo từng vị trí trong 10 kỳ gần nhất.' },
+  { id: 'c2', name: 'Công thức 2 · Tần suất kế tiếp', prompt: 'Chọn chữ số có tần suất cao thứ hai theo từng vị trí trong 10 kỳ gần nhất.' },
+  { id: 'c3', name: 'Công thức 3 · Trung bình vị trí', prompt: 'Lấy trung bình các chữ số theo từng vị trí trong 10 kỳ gần nhất và làm tròn.' },
   { id: 'kb7', name: 'Đối chiếu giải hôm trước', prompt: 'Nghìn lấy đầu/cuối G2 theo ngày lẻ/chẵn, rồi chữ số 3 G4 số 3 và chữ số 2 G4 số 4; trăm lấy cuối G4 số 3; chục lấy giữa G6 số 3; đơn vị lấy đầu G5 số 5 của kỳ trước.' },
   { id: 'kb8', name: 'Xoay vòng ĐB', prompt: 'Xoay tail giải đặc biệt của kỳ trước sang trái một chữ số.' },
   { id: 'kb9', name: 'Đuôi giải nhất', prompt: 'Dùng 4 chữ số cuối của giải nhất kỳ trước.' },

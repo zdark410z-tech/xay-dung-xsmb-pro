@@ -209,14 +209,34 @@ function providerDisplayName(provider: AiProvider) {
   return 'DeepSeek'
 }
 
+function providerFailureCategory(error: unknown): string {
+  if (error instanceof MissingProviderApiKeyError) return 'khóa API chưa cấu hình'
+  const details = isRecord(error) ? error : {}
+  const statusCode = typeof details.statusCode === 'number' ? details.statusCode : null
+  const message = safeErrorMessage(error)
+  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError') || /timeout|timed out|aborted/i.test(message)) return 'timeout'
+  if (statusCode === 402 || /insufficient balance|low balance|balance is not enough/i.test(message)) return 'hết số dư'
+  if (statusCode === 401 || statusCode === 403 || /unauthorized|invalid api key|forbidden/i.test(message)) return 'khóa sai/không có quyền'
+  if (statusCode === 404) return 'model không tồn tại'
+  if (statusCode === 429 || /quota|resource[_\s-]?exhausted|rate.?limit|daily limit|too many requests/i.test(message)) return 'hết quota/giới hạn tốc độ'
+  if ((statusCode !== null && statusCode >= 500) || /temporarily unavailable|overloaded|high demand|fetch failed|network error/i.test(message)) return 'lỗi máy chủ/kết nối'
+  return 'lỗi phản hồi'
+}
+
+export function getProviderFailureSummaries(error: unknown) {
+  if (!(error instanceof AllProvidersFailedError)) return []
+  return error.failures.map(({ provider, error: failure }) => ({
+    provider,
+    message: `${providerDisplayName(provider)}: ${providerFailureCategory(failure)}`,
+  }))
+}
+
 export function getAiFailureMessage(error: unknown, provider?: AiProvider): string {
   if (error instanceof AllProvidersFailedError) {
     if (error.failures.length === 0) {
       return 'Các nhà cung cấp AI đã bị tạm dừng do giới hạn quota trong lần chạy này.'
     }
-    const attemptedProviders = error.failures.map(({ provider: failedProvider }) => providerDisplayName(failedProvider)).join(' → ')
-    const lastFailure = error.failures[error.failures.length - 1]
-    return `Đã thử ${attemptedProviders} nhưng không nhà cung cấp nào phản hồi được. ${lastFailure ? getAiFailureMessage(lastFailure.error, lastFailure.provider) : 'Vui lòng thử lại sau.'}`
+    return getProviderFailureSummaries(error).map(({ message }) => message).join(' · ')
   }
 
   if (error instanceof MissingProviderApiKeyError) {
