@@ -15,7 +15,7 @@ type Props = {
 }
 
 type ScenarioResponse = { scenarios: Scenario[] }
-type PredictionResponse = { prediction: string; provider?: ScenarioProvider; alreadySaved?: boolean }
+type PredictionResponse = { prediction: string; provider?: ScenarioProvider; saved?: boolean; alreadySaved?: boolean }
 type Tab = 'history' | 'predict' | 'config'
 
 async function fetcher<T>(url: string): Promise<T> {
@@ -115,6 +115,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
       if (!response.ok) throw new Error(payload.error ?? 'Không thể tạo dự đoán.')
 
       const result = payload as PredictionResponse
+      if (result.saved !== true) throw new Error(`${scenario.name}: máy chủ chưa xác nhận lưu dự đoán.`)
       const actualProvider = result.provider ?? scenario.provider
       const providerNames: Record<ScenarioProvider, string> = {
         formula: 'công thức nội bộ',
@@ -140,13 +141,12 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
       )
       void mutateHistory()
     } catch (error) {
-      setMessage(
-        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
-          ? 'AI phản hồi quá lâu. Vui lòng thử lại sau.'
-          : error instanceof Error
-            ? error.message
-            : 'Không thể tạo dự đoán.',
-      )
+      const detail = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+        ? 'AI phản hồi quá lâu. Vui lòng thử lại sau.'
+        : error instanceof Error
+          ? error.message
+          : 'Không thể tạo dự đoán.'
+      setMessage(detail.startsWith(`${scenario.name}:`) ? detail : `${scenario.name}: ${detail}`)
     } finally {
       setRunningId(null)
     }
@@ -178,7 +178,7 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
         <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')} aria-current={tab === 'history' ? 'page' : undefined}>
           <ClipboardList aria-hidden="true" size={17} /> Lịch sử & đối chiếu
         </button>
-        <button className={tab === 'predict' ? 'active' : ''} onClick={() => setTab('predict')} aria-current={tab === 'predict' ? 'page' : undefined}>
+        <button className={tab === 'predict' ? 'active' : ''} onClick={() => { setTab('predict'); void mutateHistory() }} aria-current={tab === 'predict' ? 'page' : undefined}>
           <WandSparkles aria-hidden="true" size={17} /> Dự đoán & tính toán
         </button>
         <button className={tab === 'config' ? 'active' : ''} onClick={() => setTab('config')} aria-current={tab === 'config' ? 'page' : undefined}>
@@ -211,7 +211,10 @@ export default function XsmbApp({ todayDate, initialTargetDate }: Props) {
           resultProviders={resultProviders}
           runningId={runningId}
           message={message}
-          onTargetDateChange={(date) => setTargetDate(date)}
+          onTargetDateChange={(date) => {
+            setTargetDate(date)
+            void mutateHistory()
+          }}
           onRun={runScenario}
         />
       )}

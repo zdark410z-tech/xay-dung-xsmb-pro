@@ -1,5 +1,5 @@
 import { and, desc, eq, lt } from 'drizzle-orm'
-import { generateSinglePrediction, getAiFailureMessage, type AiProvider } from '@/lib/ai-prediction'
+import { generateSinglePrediction, getAiFailureMessage, getProviderFailureSummaries, type AiProvider } from '@/lib/ai-prediction'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { formulaPrediction } from '@/lib/xsmb-formulas'
@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
         provider: existing.provider,
         scenarioId: scenario.id,
         targetDate,
+        saved: true,
         alreadySaved: true,
       })
     }
@@ -167,7 +168,13 @@ export async function POST(request: NextRequest) {
         modelId = result.modelId
         activeProvider = result.provider
       } catch (error) {
-        return NextResponse.json({ error: getAiFailureMessage(error, scenario.provider as AiProvider) }, { status: 502 })
+        const providerErrors = getProviderFailureSummaries(error)
+        return NextResponse.json({
+          error: providerErrors.length
+            ? providerErrors.map(({ message }) => message).join(' · ')
+            : getAiFailureMessage(error, scenario.provider as AiProvider),
+          ...(providerErrors.length ? { providerErrors } : {}),
+        }, { status: 502 })
       }
     }
 
@@ -189,7 +196,7 @@ export async function POST(request: NextRequest) {
       .returning({ prediction: xsmbPredictions.prediction, provider: xsmbPredictions.provider })
 
     if (inserted) {
-      return NextResponse.json({ prediction: inserted.prediction, provider: inserted.provider, scenarioId: scenario.id, targetDate })
+      return NextResponse.json({ prediction: inserted.prediction, provider: inserted.provider, scenarioId: scenario.id, targetDate, saved: true })
     }
 
     const [saved] = await db
@@ -204,11 +211,16 @@ export async function POST(request: NextRequest) {
       )
       .limit(1)
 
+    if (!saved) {
+      return NextResponse.json({ error: 'Không thể xác nhận dự đoán đã lưu trong lịch sử.' }, { status: 503 })
+    }
+
     return NextResponse.json({
-      prediction: saved?.prediction ?? prediction,
-      provider: saved?.provider ?? activeProvider,
+      prediction: saved.prediction,
+      provider: saved.provider,
       scenarioId: scenario.id,
       targetDate,
+      saved: true,
       alreadySaved: true,
     })
   } catch {
