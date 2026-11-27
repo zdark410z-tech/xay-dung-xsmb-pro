@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react'
 import { BarChart3, ChevronDown } from 'lucide-react'
 import type { BacktestResult, BacktestWindow } from '@/lib/xsmb-backtest'
-import type { Scenario, XsmbDraw } from '@/lib/xsmb-types'
+import type { Scenario, XsmbAiCommentary, XsmbDraw } from '@/lib/xsmb-types'
 
 type Props = {
   draws: XsmbDraw[]
@@ -12,6 +12,7 @@ type Props = {
   syncError: string | null
   loadError?: string
   backtest?: BacktestResult
+  aiCommentary?: XsmbAiCommentary | null
   backtestLoading: boolean
   backtestError?: string
   onSync: () => void
@@ -110,6 +111,7 @@ export function HistoryPanel({
   syncError,
   loadError,
   backtest,
+  aiCommentary,
   backtestLoading,
   backtestError,
   onSync,
@@ -197,6 +199,13 @@ export function HistoryPanel({
             </select>
           </label>
         </div>
+        <aside className="ai-commentary" aria-label="Nhận xét AI hằng ngày">
+          <div className="ai-commentary-heading">
+            <strong>Nhận xét AI (cập nhật 1 lần/ngày)</strong>
+            <small>{aiCommentary ? `${formatDate(aiCommentary.targetDate)} · ${aiCommentary.provider === 'formula' ? 'Tự động bằng code' : aiCommentary.provider === 'gemini' ? 'Gemini' : aiCommentary.provider === 'groq' ? 'Groq' : 'DeepSeek'}${aiCommentary.provider !== 'formula' ? ` · ${aiCommentary.modelId}` : ''}` : `${formatDate(today)} · Tự động bằng code`}</small>
+          </div>
+          <p>{aiCommentary?.analysis ?? 'Chưa có nhận xét hôm nay, đang dùng nhận xét tự động'}</p>
+        </aside>
         <p className="backtest-note">kb11/kb12/kb13 là kịch bản đối chứng để so sánh. Kết quả xổ số mang tính ngẫu nhiên nên một số kịch bản trông tốt chỉ do may rủi. Mốc ngoài mẫu: {backtest?.freezeDate ?? '2026-11-27'}.</p>
         {backtestLoading && <p className="empty-state" role="status">Đang tính backtest từ lịch sử…</p>}
         {backtestError && <p className="empty-state" role="alert">{backtestError}</p>}

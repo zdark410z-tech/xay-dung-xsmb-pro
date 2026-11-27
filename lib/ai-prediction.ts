@@ -281,6 +281,78 @@ export function getAiFailureMessage(error: unknown, provider?: AiProvider): stri
   return 'API AI chưa phản hồi. Vui lòng thử lại sau.'
 }
 
+export async function generateDailyCommentary(backtest: {
+  groups: {
+    all: Array<{
+      scenarioId: string
+      name: string
+      n: number
+      positions: Array<{
+        hits: number
+        rate: number | null
+        expectedRate: number | null
+        pValue: number | 'mẫu nhỏ'
+      }>
+    }>
+    'after-freeze': Array<{
+      scenarioId: string
+      name: string
+      n: number
+      positions: Array<{
+        hits: number
+        rate: number | null
+        expectedRate: number | null
+        pValue: number | 'mẫu nhỏ'
+      }>
+    }>
+  }
+}) {
+  const table = {
+    tatCa: backtest.groups.all.map(({ scenarioId, name, n, positions }) => ({
+      scenarioId,
+      name,
+      n,
+      positions: positions.map(({ hits, rate, expectedRate, pValue }) => ({ hits, rate, expectedRate, pValue })),
+    })),
+    ngoaiMau: backtest.groups['after-freeze'].map(({ scenarioId, name, n, positions }) => ({
+      scenarioId,
+      name,
+      n,
+      positions: positions.map(({ hits, rate, expectedRate, pValue }) => ({ hits, rate, expectedRate, pValue })),
+    })),
+  }
+  const instructions = [
+    'Viết đúng một nhận xét bằng tiếng Việt, tối đa 120 từ, chỉ dựa trên bảng số liệu backtest được cung cấp.',
+    'Không bịa hoặc suy diễn số liệu; không đưa ra hay dự đoán bất kỳ con số nào cho ngày mai.',
+    'Nêu rõ kịch bản nào có tỷ lệ trông tốt hơn mức ngẫu nhiên kỳ vọng nhưng chưa khác ngẫu nhiên; không khẳng định hiệu quả nếu p-value không chứng minh được điều đó.',
+    'Nhắc rằng kết quả xổ số mang tính ngẫu nhiên. Nếu n < 100, nói rõ mẫu còn nhỏ.',
+    'Không thêm tiêu đề, lời chào hoặc nội dung ngoài nhận xét.',
+  ].join(' ')
+  const failures: ProviderFailure[] = []
+
+  for (const provider of ['gemini', 'groq', 'deepseek'] as const) {
+    try {
+      const result = await generateText({
+        model: createModel(provider),
+        instructions,
+        prompt: JSON.stringify(table),
+        maxOutputTokens: 256,
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(25_000),
+      })
+      const words = result.text.trim().split(/\s+/).filter(Boolean)
+      const analysis = words.slice(0, 120).join(' ')
+      if (!analysis) throw new Error('AI trả về nhận xét trống')
+      return { analysis, provider, modelId: AI_MODELS[provider] }
+    } catch (error) {
+      failures.push({ provider, error })
+      logProviderFailure('daily-commentary', provider, error)
+    }
+  }
+
+  throw new AllProvidersFailedError(failures)
+}
+
 export async function generateSinglePrediction({
   provider,
   targetDate,

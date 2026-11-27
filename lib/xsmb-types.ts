@@ -35,9 +35,17 @@ export type XsmbDraw = {
   reports: Record<string, XsmbAiReport>
 }
 
+export type XsmbAiCommentary = {
+  targetDate: string
+  analysis: string
+  provider: ScenarioProvider
+  modelId: string
+}
+
 export type XsmbHistoryResponse = {
   draws: XsmbDraw[]
   count: number
   syncedAt: string | null
   syncError: string | null
+  aiCommentary?: XsmbAiCommentary | null
 }

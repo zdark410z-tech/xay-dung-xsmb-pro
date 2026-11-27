@@ -132,8 +132,8 @@ export function ScenarioPanel({ scenarios, loading, loadError, onChanged }: Prop
         <div className="config-note schedule-note" role="note">
           <span className="gateway-indicator" aria-hidden="true" />
           <div>
-            <strong>Lịch dự kiến: 10:00 mỗi ngày, giờ Việt Nam.</strong>
-            <p>Khi có đúng 6 kịch bản tùy chỉnh và CRON_SECRET, hệ thống gửi từng kịch bản đến Groq và DeepSeek lúc 10:00 giờ Việt Nam; 12 kết quả được lưu vào lịch sử. Gemini vẫn có thể chọn thủ công. Đây là suy luận hằng ngày, không phải huấn luyện lại mô hình.</p>
+            <strong>Lịch tự động: 10:00 và 10:20 mỗi ngày, giờ Việt Nam.</strong>
+            <p>Hai lượt cron đồng bộ kết quả và chỉ lưu dự đoán theo các công thức c1–c3, kb7–kb13. Nhận xét AI về backtest được tạo tối đa một lần mỗi ngày; AI không chọn số dự đoán. CRON_SECRET được xác thực ở máy chủ.</p>
           </div>
         </div>
 

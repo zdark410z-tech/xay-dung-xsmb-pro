@@ -1,5 +1,7 @@
 import { FORMULA_SCENARIOS, positionRulePrediction, type FormulaScenarioId, type PositionDraw } from '@/lib/xsmb-position-rules'
 
+export const BACKTEST_FREEZE_DATE = '2026-11-27'
+
 export type BacktestWindow = 'all' | '90' | '30' | 'before-freeze' | 'after-freeze'
 
 export type BacktestPositionMetric = {
