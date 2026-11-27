@@ -3,6 +3,7 @@ import { generateSinglePrediction, getAiFailureMessage, type AiProvider } from '
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { formulaPrediction } from '@/lib/xsmb-formulas'
+import { positionRulePrediction } from '@/lib/xsmb-position-rules'
 import { xsmbDraws, xsmbPredictions, xsmbScenarios } from '@/lib/db/schema'
 import { isSameOriginRequest } from '@/lib/request-security'
 
@@ -123,7 +124,8 @@ export async function POST(request: NextRequest) {
       .limit(10)
     const tails = recentDraws.map((draw) => draw.tail).filter((tail) => /^\d{4}$/.test(tail))
 
-    if (!tails.length) {
+    const isPositionFormula = scenario.provider === 'formula' && /^kb(?:[7-9]|1[0-3])$/.test(scenario.id)
+    if (!tails.length && !(scenario.id === 'kb12' && scenario.provider === 'formula')) {
       return NextResponse.json({ error: 'Chưa có kết quả xổ số để phân tích. Hãy đồng bộ dữ liệu trước.' }, { status: 409 })
     }
 
@@ -132,7 +134,21 @@ export async function POST(request: NextRequest) {
     let activeProvider: AiProvider | 'formula' = scenario.provider as AiProvider | 'formula'
 
     if (scenario.provider === 'formula') {
-      prediction = formulaPrediction(scenario.id, tails)
+      if (isPositionFormula) {
+        const priorDraws = await db
+          .select({ date: xsmbDraws.drawDate, tail: xsmbDraws.tail, prizes: xsmbDraws.prizes })
+          .from(xsmbDraws)
+          .where(and(eq(xsmbDraws.userId, USER_SCOPE), lt(xsmbDraws.drawDate, targetDate)))
+          .orderBy(desc(xsmbDraws.drawDate))
+          .limit(2)
+        const calculated = positionRulePrediction(scenario.id, targetDate, priorDraws)
+        prediction = calculated?.prediction ?? null
+        if (!prediction) {
+          return NextResponse.json({ error: 'Chưa đủ dữ liệu của các kỳ liền trước cho kịch bản này.' }, { status: 409 })
+        }
+      } else {
+        prediction = formulaPrediction(scenario.id, tails)
+      }
       if (!prediction) {
         return NextResponse.json({ error: 'Kịch bản công thức không được hỗ trợ.' }, { status: 400 })
       }

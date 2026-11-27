@@ -1,4 +1,6 @@
+import { Fragment, useState } from 'react'
 import { BarChart3, ChevronDown } from 'lucide-react'
+import type { BacktestResult, BacktestWindow } from '@/lib/xsmb-backtest'
 import type { Scenario, XsmbDraw } from '@/lib/xsmb-types'
 
 type Props = {
@@ -9,6 +11,9 @@ type Props = {
   syncedAt: string | null
   syncError: string | null
   loadError?: string
+  backtest?: BacktestResult
+  backtestLoading: boolean
+  backtestError?: string
   onSync: () => void
 }
 
@@ -67,6 +72,21 @@ function providerLabel(scenario: Scenario) {
   return 'Công thức'
 }
 
+const BACKTEST_WINDOWS: Array<{ value: BacktestWindow; label: string }> = [
+  { value: 'all', label: 'Tất cả' },
+  { value: '90', label: '90 ngày gần nhất' },
+  { value: '30', label: '30 ngày gần nhất' },
+  { value: 'before-freeze', label: 'Trước 27/11' },
+  { value: 'after-freeze', label: 'Từ 27/11 (ngoài mẫu)' },
+]
+
+const POSITION_LABELS = ['Nghìn', 'Trăm', 'Chục', 'Đơn vị']
+const MULTIPLE_TEST_THRESHOLD = 0.05 / 28
+
+function formatPercent(value: number | null) {
+  return value === null ? '—' : `${(value * 100).toFixed(1).replace('.', ',')}%`
+}
+
 function summarizePredictions(predictions: Record<string, string>) {
   const values = Object.values(predictions).filter((value) => /^\d{4}$/.test(value))
   if (!values.length) return null
@@ -89,8 +109,12 @@ export function HistoryPanel({
   syncedAt,
   syncError,
   loadError,
+  backtest,
+  backtestLoading,
+  backtestError,
   onSync,
 }: Props) {
+  const [backtestWindow, setBacktestWindow] = useState<BacktestWindow>('all')
   const actualDraws = draws.filter((draw) => /^\d{4}$/.test(draw.tail))
   const today = getVietnamDateKey()
   const status = loadError
@@ -121,7 +145,7 @@ export function HistoryPanel({
 
       {scenarios.length > 0 && (
         <div className="summary-grid" aria-label="Hiệu suất theo kịch bản">
-          {scenarios.map((scenario) => {
+          {scenarios.filter((scenario) => !/^kb(?:[7-9]|1[0-3])$/.test(scenario.id)).map((scenario) => {
             const color = scenario.provider === 'formula'
               ? scenario.id === 'c2' ? 'green' : scenario.id === 'c3' ? 'blue' : 'red'
               : scenario.provider === 'groq' ? 'green' : scenario.provider === 'deepseek' ? 'cyan' : 'purple'
@@ -159,6 +183,67 @@ export function HistoryPanel({
           })}
         </div>
       )}
+
+      <section className="backtest-panel" aria-labelledby="backtest-title">
+        <div className="backtest-heading">
+          <div>
+            <p className="eyebrow">KIỂM CHỨNG NGOÀI MẪU</p>
+            <h3 id="backtest-title">Kiểm chứng trung thực (backtest)</h3>
+          </div>
+          <label>
+            <span className="sr-only">Nhóm kỳ backtest</span>
+            <select value={backtestWindow} onChange={(event) => setBacktestWindow(event.target.value as BacktestWindow)}>
+              {BACKTEST_WINDOWS.map((window) => <option key={window.value} value={window.value}>{window.label}</option>)}
+            </select>
+          </label>
+        </div>
+        <p className="backtest-note">kb11/kb12/kb13 là kịch bản đối chứng để so sánh. Kết quả xổ số mang tính ngẫu nhiên nên một số kịch bản trông tốt chỉ do may rủi. Mốc ngoài mẫu: {backtest?.freezeDate ?? '2026-11-27'}.</p>
+        {backtestLoading && <p className="empty-state" role="status">Đang tính backtest từ lịch sử…</p>}
+        {backtestError && <p className="empty-state" role="alert">{backtestError}</p>}
+        {backtest && (
+          <div className="backtest-table-wrap">
+            <table className="backtest-table">
+              <thead>
+                <tr>
+                  <th scope="col">Kịch bản</th>
+                  {POSITION_LABELS.map((label) => <th scope="col" key={label}>{label}</th>)}
+                  <th scope="col">Tổng / đủ 4</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backtest.groups[backtestWindow].map((scenario) => (
+                  <Fragment key={scenario.scenarioId}>
+                    <tr>
+                      <th scope="row">{scenario.name}<small>n = {scenario.n}</small></th>
+                      {scenario.positions.map((position, index) => (
+                        <td key={`${scenario.scenarioId}-${POSITION_LABELS[index]}`}>
+                          {scenario.n
+                            ? <>{position.hits}/{scenario.n} ({formatPercent(position.rate)}) · ngẫu nhiên {formatPercent(position.expectedRate)}</>
+                            : '—'}
+                        </td>
+                      ))}
+                      <td>{scenario.n
+                        ? <>{scenario.totalHits}/{scenario.n * 4} đúng · kỳ vọng {scenario.expectedTotalHits.toFixed(1)}<small>{scenario.fullHits}/{scenario.n} ngày đủ 4 · kỳ vọng {scenario.expectedFullHits.toFixed(2)}</small></>
+                        : '—'}</td>
+                    </tr>
+                    <tr className="backtest-comment-row" key={`${scenario.scenarioId}-notes`}>
+                      <td colSpan={6}>
+                        {scenario.positions.map((position, index) => {
+                          const conclusion = scenario.n >= 100 && typeof position.pValue === 'number' && position.pValue < MULTIPLE_TEST_THRESHOLD
+                            ? 'khác ngẫu nhiên'
+                            : 'chưa khác ngẫu nhiên'
+                          const smallSample = scenario.n < 100 ? ' · mẫu nhỏ, chưa kết luận' : ''
+                          return <span key={`${scenario.scenarioId}-comment-${index}`}>{POSITION_LABELS[index]}: {position.hits}/{scenario.n} ({formatPercent(position.rate)}) · ngẫu nhiên {formatPercent(position.expectedRate)} · {conclusion}{smallSample}{index < 3 ? ' | ' : ''}</span>
+                        })}
+                      </td>
+                    </tr>
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <div className="section-label">
         <span>KẾT QUẢ & DỰ ĐOÁN</span>
